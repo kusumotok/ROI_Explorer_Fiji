@@ -4,6 +4,8 @@ ROI Explorer is a Fiji/ImageJ plugin for browsing, editing, measuring, and reorg
 
 The plugin presents ROI folders and ZIP archives in a TreeTable UI, can bind to an open image, and supports ROI-oriented workflows that are awkward in the default ROI Manager.
 
+Japanese README: [README.ja.md](./README.ja.md)
+
 Menu location in Fiji:
 
 - `Plugins > ROI Explorer`
@@ -24,7 +26,15 @@ Menu location in Fiji:
 - Undo and redo file/tree operations in the current ROI Explorer session
 - Undo and redo selection edits during ROI edit mode
 
-## Build
+## Install from Release
+
+1. Download `ROI_Explorer_Fiji.jar` from the latest GitHub Release.
+2. Copy the jar into your Fiji `plugins` directory.
+3. Restart Fiji.
+
+The release artifact contains the ROI Explorer plugin jar only. Fiji/ImageJ and other third-party components remain subject to their own licenses.
+
+## Build from Source
 
 Requirements:
 
@@ -43,10 +53,6 @@ The built jar is generated as:
 ```text
 target/ROI_Explorer_Fiji.jar
 ```
-
-## Install
-
-Copy the built jar into your Fiji `plugins` directory, then restart Fiji.
 
 ## Basic workflow
 
