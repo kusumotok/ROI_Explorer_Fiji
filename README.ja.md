@@ -26,8 +26,7 @@ Fiji メニュー:
 - edit 中 selection 変更の undo / redo
 
 ## Release から導入
-
-1. GitHub Releases から `ROI_Explorer_Fiji.jar` をダウンロード
+1. [GitHub Releases](https://github.com/kusumotok/ROI_Explorer_Fiji/releases) から `ROI_Explorer_Fiji.jar` をダウンロード
 2. Fiji の `plugins` ディレクトリに配置
 3. Fiji を再起動
 

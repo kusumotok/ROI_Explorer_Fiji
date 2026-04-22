@@ -27,8 +27,7 @@ Menu location in Fiji:
 - Undo and redo selection edits during ROI edit mode
 
 ## Install from Release
-
-1. Download `ROI_Explorer_Fiji.jar` from the latest GitHub Release.
+1. Download `ROI_Explorer_Fiji.jar` from [GitHub Releases](https://github.com/kusumotok/ROI_Explorer_Fiji/releases).
 2. Copy the jar into your Fiji `plugins` directory.
 3. Restart Fiji.
 
