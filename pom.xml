@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.kusumotok</groupId>
+    <artifactId>roi-explorer-fiji</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>ROI Explorer Fiji</name>
+    <description>Fiji plugin for exploring and managing ROI trees via a TreeTable view</description>
+
+    <developers>
+        <developer>
+            <id>kusumotok</id>
+            <name>Kaito Kusumoto</name>
+            <email>135571141+kusumotok@users.noreply.github.com</email>
+            <url>https://github.com/kusumotok</url>
+        </developer>
+    </developers>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.release>8</maven.compiler.release>
+        <ij.version>1.54p</ij.version>
+        <junit.version>4.13.2</junit.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>scijava.public</id>
+            <url>https://maven.scijava.org/content/groups/public</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>net.imagej</groupId>
+            <artifactId>ij</artifactId>
+            <version>${ij.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>ROI_Explorer_Fiji</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                    <release>8</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>-Djava.awt.headless=true</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Implementation-Title>${project.name}</Implementation-Title>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Implementation-Vendor>kusumotok</Implementation-Vendor>
+                            <Automatic-Module-Name>io.github.kusumotok.roiexplorer</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+        </resources>
+    </build>
+</project>

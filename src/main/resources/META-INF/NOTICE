@@ -1,0 +1,11 @@
+ROI Explorer for Fiji
+Copyright (c) kusumotok
+
+This distribution contains ROI Explorer for Fiji together with metadata for
+plugin discovery via plugins.config.
+
+Third-party dependencies are provided separately by the Fiji/ImageJ runtime
+or by Maven during build, according to the project pom.xml.
+
+License terms for this project should be provided in a top-level LICENSE file
+before public distribution.
