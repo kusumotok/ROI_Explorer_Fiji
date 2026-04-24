@@ -39,7 +39,7 @@ public class GroupMeasurementDialog extends JDialog {
     private final JCheckBox ch3DSlices = new JCheckBox("Occupied_slices");
 
     public GroupMeasurementDialog(Window owner, ImagePlus imp, Options initial) {
-        super(owner, "Set Group Measurements", ModalityType.APPLICATION_MODAL);
+        super(owner, "Set Folder Measurements", ModalityType.APPLICATION_MODAL);
         this.opts = initial != null ? initial.copy() : new Options();
         setLayout(new BorderLayout(6, 6));
 

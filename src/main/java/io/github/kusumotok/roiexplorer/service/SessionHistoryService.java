@@ -20,17 +20,13 @@ public class SessionHistoryService {
         void redo(OpenViewRegistry registry) throws IOException;
     }
 
-    private static final SessionHistoryService INSTANCE = new SessionHistoryService();
     private static final int DEFAULT_MAX_HISTORY = 50;
 
     private final Deque<HistoryAction> undoStack = new ArrayDeque<>();
     private final Deque<HistoryAction> redoStack = new ArrayDeque<>();
     private int maxHistory = DEFAULT_MAX_HISTORY;
 
-    private SessionHistoryService() {}
-
-    public static SessionHistoryService getInstance() {
-        return INSTANCE;
+    public SessionHistoryService() {
     }
 
     public synchronized boolean canUndo() {

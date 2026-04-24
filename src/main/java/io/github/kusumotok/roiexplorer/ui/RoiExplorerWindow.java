@@ -42,7 +42,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private GroupMeasurementService.Options groupMeasureOptions = new GroupMeasurementService.Options();
     private boolean groupMeasureConfigured;
     private final RoiManagerInteropService roiManagerSvc = new RoiManagerInteropService();
-    private final SessionHistoryService historySvc = SessionHistoryService.getInstance();
+    private final SessionHistoryService historySvc = new SessionHistoryService();
     private final NodeLoader nodeLoader = new NodeLoader();
     private final RoiEditController editCtrl = new RoiEditController(this);
 
@@ -60,7 +60,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private final JButton btnDelete       = new JButton("Delete");
     private final JButton btnRename       = new JButton("Rename...");
     private final JButton btnMeasure      = new JButton("Measure ROI");
-    private final JButton btnGroupMeasure = new JButton("Group Measure...");
+    private final JButton btnGroupMeasure = new JButton("Measure Folder...");
     private final JButton btnPickRoi      = new JButton("Pick ROI");
     private final JButton btnToggleVis    = new JButton("Toggle Visibility");
     private final JButton btnDeselect     = new JButton("Deselect");
@@ -754,7 +754,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         List<ExplorerNode> sel = getSelectedNodes();
         List<ExplorerNode> units = selResolver.resolveGroupUnits(sel, tableModel.getViewRoot());
         if (units.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No group units to measure.", "Group Measure", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "No folders or grouped ROI units to measure.", "Measure Folder", JOptionPane.WARNING_MESSAGE);
             return;
         }
         if (!groupMeasureConfigured && !cmdSetGroupMeasureOptions()) return;
@@ -1327,7 +1327,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         menu.addSeparator();
         addMenuItem(menu, "Import from ROI Manager", e -> cmdImportFromRoiManager()).setEnabled(!splitting);
         addMenuItem(menu, "Export to ROI Manager", e -> cmdExportToRoiManager()).setEnabled(!sel.isEmpty() && !splitting);
-        addMenuItem(menu, "Set Group Measurements...", e -> cmdSetGroupMeasureOptions()).setEnabled(!splitting);
+        addMenuItem(menu, "Set Folder Measurements...", e -> cmdSetGroupMeasureOptions()).setEnabled(!splitting);
         menu.addSeparator();
         addMenuItem(menu, "Zip", e -> cmdZip()).setEnabled(roiOnlyFolder && !splitting);
         addMenuItem(menu, "Unzip to Folder", e -> cmdUnzip()).setEnabled(hasZip && !splitting);

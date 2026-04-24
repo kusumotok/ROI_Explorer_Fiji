@@ -366,7 +366,11 @@ public class SelectionEditToolsDialog extends JDialog {
         }
         updateGuideOverlay();
         if (livePreview.isSelected() || forceImageRoi) {
-            image.setRoi(previewRoi != null ? (Roi) previewRoi.clone() : (Roi) workingRoi.clone());
+            if ((tool == Tool.KNIFE || tool == Tool.SEED_SPLIT) && previewSplitParts != null && !previewSplitParts.isEmpty()) {
+                image.setRoi((Roi) workingRoi.clone());
+            } else {
+                image.setRoi(previewRoi != null ? (Roi) previewRoi.clone() : (Roi) workingRoi.clone());
+            }
         } else {
             image.setRoi((Roi) workingRoi.clone());
         }
@@ -516,6 +520,23 @@ public class SelectionEditToolsDialog extends JDialog {
         Overlay merged = cloneOverlay(baseOverlay);
         if (merged == null) merged = new Overlay();
         Tool tool = toolList.getSelectedValue();
+        if ((tool == Tool.KNIFE || tool == Tool.SEED_SPLIT) && previewSplitParts != null) {
+            Color[] colors = new Color[]{
+                    new Color(255, 140, 0, 220),
+                    new Color(0, 170, 220, 220),
+                    new Color(80, 200, 120, 220),
+                    new Color(220, 80, 120, 220)
+            };
+            for (int i = 0; i < previewSplitParts.size(); i++) {
+                Roi part = previewSplitParts.get(i);
+                if (part == null) continue;
+                Roi copy = (Roi) part.clone();
+                copy.setFillColor(null);
+                copy.setStrokeWidth(1.5f);
+                copy.setStrokeColor(colors[i % colors.length]);
+                merged.add(copy);
+            }
+        }
         if (tool == Tool.KNIFE && knifeStart != null && knifeEnd != null) {
             Line line = new Line(knifeStart.x, knifeStart.y, knifeEnd.x, knifeEnd.y);
             line.setStrokeColor(Color.ORANGE);
@@ -702,8 +723,8 @@ public class SelectionEditToolsDialog extends JDialog {
     }
 
     private static ToolComputation computeKnifeResult(Roi source, double angleDeg, double offsetPx, int cutWidth) {
-        if (cutWidth <= 0) {
-            List<Roi> parts = knifeSplitParts(source, angleDeg, offsetPx);
+        List<Roi> parts = knifeSplitParts(source, angleDeg, offsetPx);
+        if (parts.size() >= 2) {
             return ToolComputation.of(joinRois(parts, source), parts);
         }
         return ToolComputation.of(applyKnife(source, angleDeg, offsetPx, cutWidth));

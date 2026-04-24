@@ -96,7 +96,7 @@ public class GroupMeasurementService {
             if (originalState != null) originalState.restore(imp);
         }
 
-        rt.show("Group Results");
+        rt.show("Folder Results");
     }
 
     private Map<GroupKey, List<RoiNode>> groupRois(List<RoiNode> rois, Options opts) {
@@ -114,6 +114,7 @@ public class GroupMeasurementService {
     private void addRow(ResultsTable rt, String unitName, List<RoiNode> rois,
                         GroupKey key, Options opts, ImagePlus imp) {
         String lengthUnitSuffix = lengthUnitSuffix(imp);
+        VoxelMetrics metrics = needsVoxelMetrics(opts, imp) ? buildVoxelMetrics(rois, imp) : null;
         rt.incrementCounter();
         rt.addLabel(unitName);
 
@@ -136,16 +137,15 @@ public class GroupMeasurementService {
             double max = areas.stream().mapToDouble(a -> a[0]).max().orElse(0);
             rt.addValue("Area_max", max);
         }
-        if (opts.principalAxesXY) {
-            VoxelMetrics metrics = buildVoxelMetrics(rois, imp);
+        if (opts.principalAxesXY && metrics != null) {
             rt.addValue("Long_axis_xy_" + lengthUnitSuffix, metrics.majorAxisXYUm);
             rt.addValue("Short_axis_xy_" + lengthUnitSuffix, metrics.minorAxisXYUm);
         }
 
         if (use3DMetrics(opts, imp)) {
-            add3DMetrics(rt, rois, areaSum, opts, imp);
-        } else if (useIntensityMetrics(opts)) {
-            addIntensityMetrics(rt, rois, opts, imp);
+            add3DMetrics(rt, metrics, opts, lengthUnitSuffix);
+        } else if (useIntensityMetrics(opts) && metrics != null) {
+            addIntensityMetrics(rt, metrics, opts, lengthUnitSuffix);
         }
     }
 
@@ -167,10 +167,9 @@ public class GroupMeasurementService {
         return result;
     }
 
-    private void add3DMetrics(ResultsTable rt, List<RoiNode> rois, double totalArea,
-                              Options opts, ImagePlus imp) {
-        VoxelMetrics metrics = buildVoxelMetrics(rois, imp);
-        String lengthUnitSuffix = lengthUnitSuffix(imp);
+    private void add3DMetrics(ResultsTable rt, VoxelMetrics metrics,
+                              Options opts, String lengthUnitSuffix) {
+        if (metrics == null) return;
         Set<Integer> zSlices = new TreeSet<>();
         zSlices.addAll(metrics.zSlices);
 
@@ -232,9 +231,8 @@ public class GroupMeasurementService {
                 || opts.centroidX || opts.centroidY || opts.centroidZ || opts.farthestPair;
     }
 
-    private void addIntensityMetrics(ResultsTable rt, List<RoiNode> rois, Options opts, ImagePlus imp) {
-        VoxelMetrics metrics = buildVoxelMetrics(rois, imp);
-        String lengthUnitSuffix = lengthUnitSuffix(imp);
+    private void addIntensityMetrics(ResultsTable rt, VoxelMetrics metrics, Options opts, String lengthUnitSuffix) {
+        if (metrics == null) return;
         if (opts.integratedIntensity) rt.addValue("Integrated_intensity", metrics.integratedIntensity);
         if (opts.meanIntensity) rt.addValue("Mean_intensity", metrics.meanIntensity);
         if (opts.maxIntensity) rt.addValue("Max_intensity", metrics.maxIntensity);
@@ -268,13 +266,14 @@ public class GroupMeasurementService {
             int z = node.getZ() > 0 ? node.getZ() : 1;
             zSlices.add(z);
             int c = node.getC() > 0 ? node.getC() : (imp != null ? imp.getC() : 1);
+            int t = node.getT() > 0 ? node.getT() : 1;
             Rectangle bounds = roi.getBounds();
             for (int y = bounds.y; y < bounds.y + bounds.height; y++) {
                 for (int x = bounds.x; x < bounds.x + bounds.width; x++) {
                     if (roi.contains(x, y)) {
                         Voxel voxel = new Voxel(x, y, z);
                         if (voxels.add(voxel)) {
-                            double value = sampleIntensity(imp, x, y, z, c);
+                            double value = sampleIntensity(imp, x, y, z, c, t);
                             integrated += value;
                             if (value > maxIntensity) maxIntensity = value;
                             double xUm = (x + 0.5) * pixelWidth;
@@ -445,12 +444,16 @@ public class GroupMeasurementService {
         metrics.minorAxisXYUm = 4.0 * Math.sqrt(lambda2);
     }
 
-    private double sampleIntensity(ImagePlus imp, int x, int y, int z, int c) {
+    private boolean needsVoxelMetrics(Options opts, ImagePlus imp) {
+        return opts.principalAxesXY || use3DMetrics(opts, imp) || useIntensityMetrics(opts);
+    }
+
+    private double sampleIntensity(ImagePlus imp, int x, int y, int z, int c, int t) {
         if (imp == null) return 0.0;
         int safeC = Math.max(1, Math.min(c, Math.max(1, imp.getNChannels())));
         int safeZ = Math.max(1, Math.min(z, Math.max(1, imp.getNSlices())));
-        int t = Math.max(1, Math.min(imp.getT(), Math.max(1, imp.getNFrames())));
-        int index = imp.getStackIndex(safeC, safeZ, t);
+        int safeT = Math.max(1, Math.min(t, Math.max(1, imp.getNFrames())));
+        int index = imp.getStackIndex(safeC, safeZ, safeT);
         return imp.getStack().getProcessor(index).getPixelValue(x, y);
     }
 
