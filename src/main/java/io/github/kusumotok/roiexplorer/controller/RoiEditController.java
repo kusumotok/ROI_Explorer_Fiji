@@ -11,7 +11,7 @@ import io.github.kusumotok.roiexplorer.model.RoiNode;
 import io.github.kusumotok.roiexplorer.service.DiskSyncService;
 import io.github.kusumotok.roiexplorer.service.RoiSplitService;
 import io.github.kusumotok.roiexplorer.service.SessionHistoryService;
-import io.github.kusumotok.roiexplorer.ui.SelectionEditToolsDialog;
+import io.github.kusumotok.roiexplorer.ui.SplitToolsDialog;
 
 import javax.swing.*;
 import java.awt.*;
@@ -34,6 +34,7 @@ public class RoiEditController {
     public interface EditHost {
         ImagePlus getBoundImage();
         void updateEditControls();
+        void clearActiveImageSelection();
         Window getWindow();
         boolean isProjectChannel();
         boolean isProjectZ();
@@ -133,7 +134,7 @@ public class RoiEditController {
                     "Save failed: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        SelectionEditToolsDialog.clearPendingSplitParts(imp);
+        SplitToolsDialog.clearPendingSplitParts(imp);
         endSession(registry);
     }
 
@@ -151,7 +152,7 @@ public class RoiEditController {
         syncEditingNodePath(registry);
         if (!checkConflict(diskSync, history, registry, current)) return;
 
-        List<Roi> parts = SelectionEditToolsDialog.consumePendingSplitParts(imp, current);
+        List<Roi> parts = SplitToolsDialog.consumePendingSplitParts(imp, current);
         if (parts == null || parts.isEmpty()) {
             parts = RoiSplitService.decomposeConnectedParts(current);
         }
@@ -172,7 +173,7 @@ public class RoiEditController {
                     "Save failed: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        SelectionEditToolsDialog.clearPendingSplitParts(imp);
+        SplitToolsDialog.clearPendingSplitParts(imp);
         endSession(registry);
     }
 
@@ -180,7 +181,7 @@ public class RoiEditController {
         if (editingNode == null) return;
         ImagePlus imp = host.getBoundImage();
         if (imp != null && originalRoi != null) {
-            SelectionEditToolsDialog.clearPendingSplitParts(imp);
+            SplitToolsDialog.clearPendingSplitParts(imp);
             imp.setRoi(originalRoi);
         }
         endSession(registry);
@@ -301,7 +302,7 @@ public class RoiEditController {
         stopSelectionTracking();
         selectionUndo.clear();
         selectionRedo.clear();
-        SelectionEditToolsDialog.clearPendingSplitParts(imp);
+        SplitToolsDialog.clearPendingSplitParts(imp);
         lastTrackedSelection = SelectionSnapshot.fromRoi(roi);
         pendingSelection = null;
         pendingSelectionSince = 0L;
@@ -380,6 +381,7 @@ public class RoiEditController {
         editingSessionId = null;
         originalRoi = null;
         editStartRevision = 0;
+        host.clearActiveImageSelection();
         host.updateEditControls();
     }
 

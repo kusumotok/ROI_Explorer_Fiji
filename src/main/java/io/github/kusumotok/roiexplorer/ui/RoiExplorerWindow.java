@@ -10,11 +10,16 @@ import ij.gui.Roi;
 import ij.gui.ShapeRoi;
 import ij.io.RoiEncoder;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry;
-import io.github.kusumotok.roiexplorer.OpenViewRegistry.EditMode;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry.PathKey;
 import io.github.kusumotok.roiexplorer.controller.RoiEditController;
+import io.github.kusumotok.roiexplorer.controller.SplitWorkflowSession;
 import io.github.kusumotok.roiexplorer.model.*;
 import io.github.kusumotok.roiexplorer.service.*;
+import io.github.kusumotok.roiexplorer.service.RoiExplorerFacade.MeasurementRequest;
+import io.github.kusumotok.roiexplorer.service.RoiExplorerFacade.MeasurementResult;
+import io.github.kusumotok.roiexplorer.service.measure.ObjectMeasurementCsvExporter;
+import io.github.kusumotok.roiexplorer.service.measure.ObjectMeasurementResult;
+import io.github.kusumotok.roiexplorer.service.measure.ObjectMeasurementService;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -29,7 +34,6 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 public class RoiExplorerWindow extends JFrame implements RoiEditController.EditHost {
 
@@ -39,6 +43,9 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private final SelectionResolver selResolver = new SelectionResolver();
     private final RoiMeasurementService measureSvc = new RoiMeasurementService();
     private final GroupMeasurementService groupMeasureSvc = new GroupMeasurementService();
+    private final ObjectMeasurementService objectMeasureSvc = new ObjectMeasurementService();
+    private final ObjectMeasurementCsvExporter objectMeasureCsvExporter = new ObjectMeasurementCsvExporter();
+    private final Roi3DWatershedService watershed3dSvc = new Roi3DWatershedService();
     private GroupMeasurementService.Options groupMeasureOptions = new GroupMeasurementService.Options();
     private boolean groupMeasureConfigured;
     private final RoiManagerInteropService roiManagerSvc = new RoiManagerInteropService();
@@ -87,12 +94,23 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private final JLabel statusLabel = new JLabel("0 ROI");
     private ImagePlus boundImage;
     private Path viewRootPath;
-    private RoiNode splitNode;
-    private UUID splitSessionId;
-    private Roi splitOriginalRoi;
+    private final SplitWorkflowSession splitWorkflow = new SplitWorkflowSession();
+    private JDialog watershed3dDialog;
+    private Watershed3DSelection watershed3dSelection;
+    private Roi3DWatershedService.Result watershed3dPreview;
+    private ImagePlus watershed3dThresholdPreviewImage;
+    private boolean watershed3dSeedOnlyPreview;
+    private JSpinner watershed3dThresholdSpinner;
+    private JComboBox<Integer> watershed3dConnectivityBox;
+    private JSpinner watershed3dMinSeedSizeSpinner;
+    private JSpinner watershed3dChannelSpinner;
+    private JSpinner watershed3dTimeSpinner;
+    private JCheckBox watershed3dReplaceOriginalBox;
+    private JLabel watershed3dStatusLabel;
     private boolean projectChannel;
     private boolean projectZ;
     private boolean projectTime;
+    private List<Path> pendingSelectionRestorePaths = Collections.emptyList();
     private boolean pickMode;
     private RoiNode hoveredPickNode;
     private java.util.List<RoiNode> pickCandidates = Collections.emptyList();
@@ -111,6 +129,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private static final Color EDIT_REFERENCE_COLOR = new Color(255, 255, 255, 90);
     private static final Color PICK_BUTTON_ACTIVE_BG = new Color(255, 236, 179);
     private static final Color PICK_BUTTON_ACTIVE_FG = new Color(102, 60, 0);
+    private Color watershed3dSeedPreviewColor = new Color(255, 200, 0, 220);
 
     // ── Sort state ────────────────────────────────────────────────────────────
     private int lastSortCol = -1;
@@ -185,9 +204,139 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         refreshOverlay();
     }
 
+    public Path getCurrentRoot() {
+        return viewRootPath;
+    }
+
+    public boolean hasLoadedRoot() {
+        return viewRootPath != null && tableModel.getViewRoot() != null;
+    }
+
+    public boolean hasActivePreview() {
+        return pickMode || editCtrl.isEditing() || isSplitModeActive() || watershed3dPreview != null;
+    }
+
+    public void cleanupPreview() {
+        uninstallPickMode();
+        if (editCtrl.isEditing()) {
+            editCtrl.cancel(OpenViewRegistry.getInstance());
+        } else if (isSplitModeActive()) {
+            cancelSplitMode();
+        } else if (watershed3dDialog != null || watershed3dPreview != null) {
+            close3DWatershedDialog();
+        } else if (boundImage != null) {
+            boundImage.killRoi();
+            boundImage.setOverlay((Overlay) null);
+            boundImage.updateAndDraw();
+        }
+        refreshOverlay();
+    }
+
+    public void setBindImage(ImagePlus imp) {
+        if (imp == null) return;
+        bindImage(imp);
+    }
+
+    public void measureCurrentRoot() {
+        cmdGroupMeasure();
+    }
+
+    public MeasurementResult measureCurrentRoot(MeasurementRequest request) {
+        if (request == null) {
+            measureCurrentRoot();
+            return MeasurementResult.performed("Measurement completed.");
+        }
+
+        if (request.getProfile() != null) {
+            List<ExplorerNode> sel = getSelectedNodes();
+            List<ObjectMeasurementResult> results;
+            try {
+                results = objectMeasureSvc.measure(sel, tableModel.getViewRoot(), request.getProfile(), boundImage);
+            } catch (IllegalArgumentException e) {
+                return MeasurementResult.notPerformed(e.getMessage());
+            }
+            if (results.isEmpty()) {
+                return MeasurementResult.notPerformed("No measurement units found.");
+            }
+            if (request.getCsvOutputPath() != null) {
+                try {
+                    objectMeasureCsvExporter.write(results, request.getCsvOutputPath());
+                } catch (IOException e) {
+                    return MeasurementResult.notPerformed("Failed to save measurement CSV: " + e.getMessage());
+                }
+            }
+            if (request.isShowResultsTable()) {
+                showObjectMeasurementTable(results);
+            }
+            return MeasurementResult.performed("Measurement completed. " + results.size() + " object(s).");
+        }
+
+        // Legacy path: GroupMeasurementService
+        GroupMeasurementService.Options explicitOptions = request.getOptions();
+        if (explicitOptions != null) {
+            groupMeasureOptions = explicitOptions.copy();
+            groupMeasureConfigured = true;
+        } else if (request.isPromptForOptions()) {
+            if (!cmdSetGroupMeasureOptions()) {
+                return MeasurementResult.notPerformed("Measurement options dialog was cancelled.");
+            }
+        }
+        List<ExplorerNode> units = selResolver.resolveGroupUnits(Collections.<ExplorerNode>emptyList(), tableModel.getViewRoot());
+        if (units.isEmpty()) {
+            return MeasurementResult.notPerformed("No folders or grouped ROI units to measure.");
+        }
+        try {
+            ij.measure.ResultsTable rt = groupMeasureSvc.measure(
+                    units,
+                    groupMeasureOptions.copy(),
+                    boundImage,
+                    request.isShowResultsTable());
+            if (request.getCsvOutputPath() != null) {
+                groupMeasureSvc.saveCsv(rt, request.getCsvOutputPath());
+            }
+        } catch (IOException e) {
+            return MeasurementResult.notPerformed("Failed to save measurement CSV: " + e.getMessage());
+        }
+        return MeasurementResult.performed("Measurement completed.");
+    }
+
+    private void showObjectMeasurementTable(List<ObjectMeasurementResult> results) {
+        ij.measure.ResultsTable rt = new ij.measure.ResultsTable();
+        for (ObjectMeasurementResult r : results) {
+            rt.incrementCounter();
+            rt.addValue("spot_id", r.spotId);
+            rt.addLabel(r.unitName);
+            rt.addValue("c", r.c);
+            rt.addValue("t", r.t);
+            rt.addValue("volume_um3", r.volumeUm3);
+            rt.addValue("volume_vox", r.volumeVox);
+            rt.addValue("surface_area_um2", r.surfaceAreaUm2);
+            rt.addValue("sphericity", r.sphericity);
+            rt.addValue("integrated_intensity", r.integratedIntensity);
+            rt.addValue("mean_intensity", r.meanIntensity);
+            rt.addValue("max_intensity", r.maxIntensity);
+            rt.addValue("centroid_x_um", r.centroidXUm);
+            rt.addValue("centroid_y_um", r.centroidYUm);
+            rt.addValue("centroid_z_um", r.centroidZUm);
+            rt.addValue("max_feret3d_um", r.maxFeret3dUm);
+        }
+        rt.show("Object Measurements");
+    }
+
+    public void launch3DWatershed() {
+        cmd3DWatershed();
+    }
+
     @Override
     public ImagePlus getBoundImage() {
         return boundImage;
+    }
+
+    @Override
+    public void clearActiveImageSelection() {
+        if (boundImage == null || editCtrl.isEditing() || isSplitModeActive()) return;
+        boundImage.killRoi();
+        boundImage.updateAndDraw();
     }
 
     @Override
@@ -203,7 +352,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
                         en != null ? "Editing: " + en.getName() : "Edit mode"));
             } else if (splitting) {
                 editModePanel.setBorder(BorderFactory.createTitledBorder(
-                        splitNode != null ? "Splitting: " + splitNode.getName() : "Split mode"));
+                        splitWorkflow.getNode() != null ? "Splitting: " + splitWorkflow.getNode().getName() : "Split mode"));
             }
             if (centerWrapper != null) centerWrapper.revalidate();
         }
@@ -230,7 +379,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
             RoiNode en = editCtrl.getEditingNode();
             setTitle("ROI Explorer – EDITING: " + (en != null ? en.getName() : ""));
         } else if (splitting) {
-            setTitle("ROI Explorer – SPLITTING: " + (splitNode != null ? splitNode.getName() : ""));
+            setTitle("ROI Explorer – SPLITTING: " + (splitWorkflow.getNode() != null ? splitWorkflow.getNode().getName() : ""));
         } else if (viewRootPath != null) {
             setTitle("ROI Explorer – " + viewRootPath.getFileName());
         }
@@ -539,7 +688,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         btnSelectionEdit.addActionListener(e -> cmdSelectionEditTools());
         btnEditUndo.addActionListener(e -> cmdUndo());
         btnEditRedo.addActionListener(e -> cmdRedo());
-        btnSplitToolPicker.addActionListener(e -> cmdSelectionTool(SelectionEditToolsDialog.Tool.KNIFE));
+        btnSplitToolPicker.addActionListener(e -> cmdSplitTool(SplitToolsDialog.Tool.KNIFE));
         btnCancelEdit.addActionListener(e -> {
             if (isSplitModeActive()) cancelSplitMode();
             else editCtrl.cancel(OpenViewRegistry.getInstance());
@@ -562,7 +711,8 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         Set<Path> expanded = tableModel.snapshotExpandedPaths();
         openFolder(viewRootPath);
         tableModel.restoreExpanded(expanded);
-        restoreSelection(sel);
+        List<Path> targetSelection = pendingSelectionRestorePaths.isEmpty() ? sel : pendingSelectionRestorePaths;
+        attemptPendingSelectionRestore(targetSelection);
     }
 
     private void cmdNewFolder() {
@@ -700,19 +850,24 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
 
     private void cmdSelectionEditTools() {
         if (isSplitModeActive()) return;
-        cmdSelectionTool(SelectionEditToolsDialog.Tool.KEEP_LARGEST);
+        cmdCleanupTool(SelectionEditToolsDialog.Tool.KEEP_LARGEST);
     }
 
-    private void cmdSelectionTool(SelectionEditToolsDialog.Tool tool) {
+    private void cmdSplitTool(SplitToolsDialog.Tool tool) {
+        if (boundImage == null) {
+            JOptionPane.showMessageDialog(this, "No image is bound. Use Bind Image first.",
+                    "Split Tools", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (!ensureSplitMode()) return;
+        SplitToolsDialog.open(this, boundImage, tool);
+        refreshOverlay();
+    }
+
+    private void cmdCleanupTool(SelectionEditToolsDialog.Tool tool) {
         if (boundImage == null) {
             JOptionPane.showMessageDialog(this, "No image is bound. Use Bind Image first.",
                     "Selection Edit Tools", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        if (tool == SelectionEditToolsDialog.Tool.KNIFE || tool == SelectionEditToolsDialog.Tool.SEED_SPLIT) {
-            if (!ensureSplitMode(tool)) return;
-            SelectionEditToolsDialog.open(this, boundImage, tool);
-            refreshOverlay();
             return;
         }
         if (!editCtrl.isEditing()) {
@@ -943,6 +1098,236 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         }
     }
 
+    private void cmd3DWatershed() {
+        if (boundImage == null) {
+            JOptionPane.showMessageDialog(this, "No image is bound. Use Bind Image first.",
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        Watershed3DSelection selection;
+        try {
+            selection = resolve3DWatershedSelection(getSelectedNodes());
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        open3DWatershedDialog(selection);
+    }
+
+    private void open3DWatershedDialog(Watershed3DSelection selection) {
+        watershed3dSelection = selection;
+        if (watershed3dDialog == null) {
+            watershed3dDialog = new JDialog(this, "3D Watershed", Dialog.ModalityType.MODELESS);
+            watershed3dDialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+            watershed3dDialog.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent e) {
+                    close3DWatershedDialog();
+                }
+
+                @Override
+                public void windowClosed(WindowEvent e) {
+                    close3DWatershedDialog();
+                }
+            });
+
+            JPanel panel = new JPanel(new BorderLayout(0, 8));
+            panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+              JPanel form = new JPanel(new GridLayout(0, 2, 8, 6));
+              watershed3dThresholdSpinner = new JSpinner(new SpinnerNumberModel(500, 0, Integer.MAX_VALUE, 1));
+              watershed3dConnectivityBox = new JComboBox<Integer>(new Integer[]{6, 18, 26});
+              watershed3dConnectivityBox.setSelectedItem(6);
+              watershed3dMinSeedSizeSpinner = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 1_000_000.0, 0.1));
+              watershed3dChannelSpinner = new JSpinner(new SpinnerNumberModel(selection.defaultCPosition, 1, Math.max(1, boundImage.getNChannels()), 1));
+              watershed3dTimeSpinner = new JSpinner(new SpinnerNumberModel(selection.defaultTPosition, 1, Math.max(1, boundImage.getNFrames()), 1));
+              watershed3dChannelSpinner.setEnabled(boundImage.getNChannels() > 1);
+              watershed3dTimeSpinner.setEnabled(boundImage.getNFrames() > 1);
+              watershed3dReplaceOriginalBox = new JCheckBox("Replace original input", true);
+              JButton seedColorButton = new JButton("Choose...");
+              seedColorButton.setBackground(watershed3dSeedPreviewColor);
+              seedColorButton.addActionListener(e -> {
+                  Color chosen = JColorChooser.showDialog(watershed3dDialog, "Seed Preview Color", watershed3dSeedPreviewColor);
+                  if (chosen == null) return;
+                  watershed3dSeedPreviewColor = new Color(chosen.getRed(), chosen.getGreen(), chosen.getBlue(), watershed3dSeedPreviewColor.getAlpha());
+                  seedColorButton.setBackground(watershed3dSeedPreviewColor);
+                  if (watershed3dPreview != null) refreshOverlay();
+              });
+              form.add(new JLabel("Seed threshold"));
+              form.add(watershed3dThresholdSpinner);
+              form.add(new JLabel("Connectivity"));
+              form.add(watershed3dConnectivityBox);
+              form.add(new JLabel("Min seed volume (um^3)"));
+              form.add(watershed3dMinSeedSizeSpinner);
+              form.add(new JLabel("Seed color"));
+              form.add(seedColorButton);
+              form.add(new JLabel("Channel"));
+              form.add(watershed3dChannelSpinner);
+              form.add(new JLabel("Time"));
+              form.add(watershed3dTimeSpinner);
+            form.add(new JLabel(""));
+            form.add(watershed3dReplaceOriginalBox);
+            panel.add(form, BorderLayout.NORTH);
+
+              JTextArea note = new JTextArea("Preview Seeds shows threshold-connected seed components only. Min seed volume follows spot quantifier semantics and uses calibrated volume (um^3). Set 0 to disable the lower filter. Apply adds watershed result overlays, then Save writes split folders next to the source.");
+            note.setEditable(false);
+            note.setOpaque(false);
+            note.setWrapStyleWord(true);
+            note.setLineWrap(true);
+            note.setBorder(null);
+            panel.add(note, BorderLayout.CENTER);
+
+              watershed3dStatusLabel = new JLabel("Adjust threshold, then Apply.");
+              panel.add(watershed3dStatusLabel, BorderLayout.WEST);
+  
+              JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+              JButton previewSeeds = new JButton("Preview Seeds");
+              JButton apply = new JButton("Apply");
+              JButton save = new JButton("Save");
+              JButton close = new JButton("Close");
+              previewSeeds.addActionListener(e -> preview3DWatershedSeeds());
+              apply.addActionListener(e -> apply3DWatershedPreview());
+              save.addActionListener(e -> save3DWatershedPreview());
+              close.addActionListener(e -> close3DWatershedDialog());
+              buttons.add(previewSeeds);
+              buttons.add(apply);
+              buttons.add(save);
+              buttons.add(close);
+            panel.add(buttons, BorderLayout.SOUTH);
+
+            watershed3dDialog.setContentPane(panel);
+            watershed3dDialog.pack();
+        }
+        if (watershed3dChannelSpinner != null) {
+            watershed3dChannelSpinner.setValue(selection.defaultCPosition);
+            watershed3dChannelSpinner.setEnabled(boundImage.getNChannels() > 1);
+        }
+        if (watershed3dTimeSpinner != null) {
+            watershed3dTimeSpinner.setValue(selection.defaultTPosition);
+            watershed3dTimeSpinner.setEnabled(boundImage.getNFrames() > 1);
+        }
+        watershed3dDialog.setLocationRelativeTo(this);
+        watershed3dDialog.setVisible(true);
+        watershed3dDialog.toFront();
+    }
+
+    private void apply3DWatershedPreview() {
+        if (watershed3dSelection == null) return;
+        try {
+            watershed3dSeedOnlyPreview = false;
+            watershed3dPreview = watershed3dSvc.runThresholdSeeds(
+                    build3DWatershedRequest());
+            update3DWatershedThresholdPreviewImage();
+            refreshOverlay();
+            if (watershed3dStatusLabel != null) {
+                if (watershed3dPreview.canRunWatershed()) {
+                    watershed3dStatusLabel.setText("Preview on image: " + watershed3dPreview.getObjectCount() + " result objects from " + watershed3dPreview.getSeedCount() + " seeds.");
+                } else {
+                    watershed3dStatusLabel.setText("Preview on image: " + watershed3dPreview.getSeedCount() + " seed(s).");
+                }
+            }
+        } catch (IllegalStateException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(),
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+        } catch (Exception e) {
+            showError("3D Watershed preview failed", e);
+        }
+    }
+
+    private void preview3DWatershedSeeds() {
+        if (watershed3dSelection == null) return;
+        try {
+            watershed3dSeedOnlyPreview = true;
+            watershed3dPreview = watershed3dSvc.previewThresholdSeeds(build3DWatershedRequest());
+            update3DWatershedThresholdPreviewImage();
+            refreshOverlay();
+            if (watershed3dStatusLabel != null) {
+                watershed3dStatusLabel.setText("Seed preview on image: " + watershed3dPreview.getSeedCount() + " seed(s).");
+            }
+        } catch (IllegalStateException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(),
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+        } catch (Exception e) {
+            showError("3D Watershed seed preview failed", e);
+        }
+    }
+
+    private Roi3DWatershedService.Request build3DWatershedRequest() {
+        return new Roi3DWatershedService.Request(
+                  boundImage,
+                  watershed3dSelection.roiNodes,
+                  ((Number) watershed3dThresholdSpinner.getValue()).intValue(),
+                  ((Integer) watershed3dConnectivityBox.getSelectedItem()).intValue(),
+                  ((Number) watershed3dMinSeedSizeSpinner.getValue()).doubleValue(),
+                  ((Number) watershed3dChannelSpinner.getValue()).intValue(),
+                  ((Number) watershed3dTimeSpinner.getValue()).intValue());
+    }
+
+    private void save3DWatershedPreview() {
+        if (watershed3dSelection == null || watershed3dPreview == null) {
+            JOptionPane.showMessageDialog(this, "Run Apply before saving 3D Watershed results.",
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (!watershed3dPreview.canRunWatershed()) {
+            JOptionPane.showMessageDialog(this, "Current threshold preview has fewer than two seeds, so there is nothing to save yet.",
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        final boolean replaceOriginal = watershed3dReplaceOriginalBox != null && watershed3dReplaceOriginalBox.isSelected();
+        try {
+            executeUndoable("3D Watershed",
+                    Collections.singletonList(watershed3dSelection.outputParent),
+                    watershed3dSelection.originalRoiPaths,
+                    () -> diskSync.saveRoiObjectFolders(
+                            watershed3dSelection.outputParent,
+                            watershed3dSelection.baseName,
+                            watershed3dPreview.getRoisByLabel(),
+                            replaceOriginal,
+                            watershed3dSelection.originalRoiPaths,
+                            watershed3dSelection.originalFolderPath,
+                            watershed3dSelection.originalZipPath,
+                            OpenViewRegistry.getInstance()));
+            int objectCount = watershed3dPreview.getObjectCount();
+            int seedCount = watershed3dPreview.getSeedCount();
+            close3DWatershedDialog();
+            reloadFromDisk();
+            JOptionPane.showMessageDialog(this,
+                    "3D watershed created " + objectCount + " object folders from " + seedCount + " seeds.",
+                    "3D Watershed", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception e) {
+            showError("3D Watershed save failed", e);
+        }
+    }
+
+    private void close3DWatershedDialog() {
+        watershed3dPreview = null;
+        watershed3dSelection = null;
+        watershed3dSeedOnlyPreview = false;
+        close3DWatershedThresholdPreviewImage();
+        if (watershed3dDialog != null) {
+            JDialog dialog = watershed3dDialog;
+            watershed3dDialog = null;
+            dialog.dispose();
+        }
+        watershed3dChannelSpinner = null;
+        watershed3dTimeSpinner = null;
+        watershed3dStatusLabel = null;
+        refreshOverlay();
+    }
+
+    private void update3DWatershedThresholdPreviewImage() {
+        close3DWatershedThresholdPreviewImage();
+        // Threshold/seed previews are shown directly on the bound image overlay.
+        // Keep this hook so older call sites stay simple, but do not open a second window.
+    }
+
+    private void close3DWatershedThresholdPreviewImage() {
+        if (watershed3dThresholdPreviewImage == null) return;
+        watershed3dThresholdPreviewImage.changes = false;
+        watershed3dThresholdPreviewImage.close();
+        watershed3dThresholdPreviewImage = null;
+    }
+
     private void cmdProperties() {
         List<ExplorerNode> sel = getSelectedNodes();
         List<RoiNode> rois = selResolver.resolveRoiNodes(sel, tableModel.getViewRoot());
@@ -969,6 +1354,107 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         } catch (IOException e) {
             showError("Properties save failed", e);
         }
+    }
+
+    private Watershed3DSelection resolve3DWatershedSelection(List<ExplorerNode> selected) {
+        if (selected == null || selected.isEmpty()) {
+            throw new IllegalArgumentException("Select a folder or sibling ROI slices for 3D Watershed.");
+        }
+        if (selected.size() == 1 && selected.get(0) instanceof FolderNode) {
+            FolderNode folder = (FolderNode) selected.get(0);
+            List<RoiNode> rois = new ArrayList<RoiNode>();
+            for (ExplorerNode child : folder.getChildren()) {
+                if (!(child instanceof RoiNode)) {
+                    throw new IllegalArgumentException("3D Watershed currently supports folders that contain ROI files only.");
+                }
+                rois.add((RoiNode) child);
+            }
+            if (rois.size() < 2) {
+                throw new IllegalArgumentException("3D Watershed requires at least two ROI slices in the selected folder.");
+            }
+            if (folder.getParent() == null) {
+                throw new IllegalArgumentException("The selected folder has no parent output location.");
+            }
+            return new Watershed3DSelection(rois, folder.getPath().getParent(), folder.getName(),
+                    historyRoiPaths(rois), folder.getPath(), null,
+                    inferDefaultChannel(rois), inferDefaultTime(rois));
+        }
+        if (selected.size() == 1 && selected.get(0) instanceof ZipNode) {
+            ZipNode zip = (ZipNode) selected.get(0);
+            List<RoiNode> rois = new ArrayList<RoiNode>();
+            for (ExplorerNode child : zip.getChildren()) {
+                if (!(child instanceof RoiNode)) {
+                    throw new IllegalArgumentException("3D Watershed currently supports ROI ZIP entries only.");
+                }
+                rois.add((RoiNode) child);
+            }
+            if (rois.size() < 2) {
+                throw new IllegalArgumentException("3D Watershed requires at least two ROI slices in the selected ZIP.");
+            }
+            if (zip.getParent() == null) {
+                throw new IllegalArgumentException("The selected ZIP has no parent output location.");
+            }
+            return new Watershed3DSelection(rois, zip.getPath().getParent(), stripZipExt(zip.getName()),
+                    historyRoiPaths(rois), null, zip.getPath(),
+                    inferDefaultChannel(rois), inferDefaultTime(rois));
+        }
+
+        List<RoiNode> rois = selResolver.resolveRoiNodes(selected, tableModel.getViewRoot());
+        if (rois.size() < 2) {
+            throw new IllegalArgumentException("Select at least two sibling ROI slices for 3D Watershed.");
+        }
+        ExplorerNode parent = rois.get(0).getParent();
+        if (!(parent instanceof FolderNode) && !(parent instanceof ZipNode)) {
+            throw new IllegalArgumentException("All ROI slices for 3D Watershed must share the same folder or ZIP parent.");
+        }
+        for (RoiNode roi : rois) {
+            if (roi.getParent() != parent) {
+                throw new IllegalArgumentException("All ROI slices for 3D Watershed must share the same parent folder or ZIP.");
+            }
+        }
+        String baseName = stripRoiExt(rois.get(0).getName());
+        Path outputParent = parent instanceof ZipNode ? parent.getPath().getParent() : parent.getPath();
+        Path originalZipPath = parent instanceof ZipNode ? parent.getPath() : null;
+        return new Watershed3DSelection(rois, outputParent, baseName, historyRoiPaths(rois), null, originalZipPath,
+                inferDefaultChannel(rois), inferDefaultTime(rois));
+    }
+
+    private int inferDefaultChannel(List<RoiNode> rois) {
+        Integer common = null;
+        for (RoiNode node : rois) {
+            Roi roi = node.getRoi();
+            if (roi == null) continue;
+            int c = roi.getCPosition();
+            if (c <= 0) continue;
+            if (common == null) {
+                common = c;
+            } else if (common.intValue() != c) {
+                break;
+            }
+        }
+        return common != null ? common.intValue() : Math.max(1, boundImage != null ? boundImage.getC() : 1);
+    }
+
+    private int inferDefaultTime(List<RoiNode> rois) {
+        Integer common = null;
+        for (RoiNode node : rois) {
+            Roi roi = node.getRoi();
+            if (roi == null) continue;
+            int t = roi.getTPosition();
+            if (t <= 0) continue;
+            if (common == null) {
+                common = t;
+            } else if (common.intValue() != t) {
+                break;
+            }
+        }
+        return common != null ? common.intValue() : Math.max(1, boundImage != null ? boundImage.getT() : 1);
+    }
+
+    private static String stripZipExt(String name) {
+        return name != null && name.toLowerCase().endsWith(".zip")
+                ? name.substring(0, name.length() - 4)
+                : name;
     }
 
     private void cmdSetHiddenOnSelection(boolean hidden) {
@@ -1043,6 +1529,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
             JOptionPane.showMessageDialog(this, "Zip is only available for ROI-only folders.", "Zip", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        List<Path> nextSelection = new ArrayList<Path>();
         try {
             executeUndoable("Zip",
                     historyZipTargets(sel),
@@ -1055,10 +1542,12 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
                                 JOptionPane.showMessageDialog(RoiExplorerWindow.this, "\"" + node.getName() + "\" contains non-ROI items and cannot be zipped.",
                                         "Zip", JOptionPane.WARNING_MESSAGE);
                                 continue;
-                            }
-                            diskSync.zipFolder((FolderNode) node, OpenViewRegistry.getInstance());
-                        }
-                    });
+                              }
+                              nextSelection.add(diskSync.zipFolder((FolderNode) node, OpenViewRegistry.getInstance()));
+                          }
+                      });
+            queueSelectionRestore(nextSelection);
+            reloadFromDisk();
         } catch (IOException e) {
             showError("Zip failed", e);
         }
@@ -1071,6 +1560,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
             JOptionPane.showMessageDialog(this, "Unzip is only available for ZIP items.", "Unzip", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        List<Path> nextSelection = new ArrayList<Path>();
         try {
             executeUndoable("Unzip",
                     historyUnzipTargets(sel),
@@ -1078,10 +1568,12 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
                     () -> {
                         for (ExplorerNode node : sel) {
                             if (node instanceof ZipNode) {
-                                diskSync.unzipToFolder((ZipNode) node, OpenViewRegistry.getInstance());
-                            }
-                        }
-                    });
+                                  nextSelection.add(diskSync.unzipToFolder((ZipNode) node, OpenViewRegistry.getInstance()));
+                              }
+                          }
+                      });
+            queueSelectionRestore(nextSelection);
+            reloadFromDisk();
         } catch (IOException e) {
             showError("Unzip failed", e);
         }
@@ -1104,10 +1596,10 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     }
 
     private boolean isSplitModeActive() {
-        return splitNode != null;
+        return splitWorkflow.isActive();
     }
 
-    private boolean ensureSplitMode(SelectionEditToolsDialog.Tool tool) {
+    private boolean ensureSplitMode() {
         if (editCtrl.isEditing()) {
             JOptionPane.showMessageDialog(this, "Finish the current edit first.", "Split Tools", JOptionPane.WARNING_MESSAGE);
             return false;
@@ -1126,58 +1618,46 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
             JOptionPane.showMessageDialog(this, "Cannot load ROI from disk.", "Split Tools", JOptionPane.WARNING_MESSAGE);
             return false;
         }
-        splitSessionId = OpenViewRegistry.getInstance().tryStartEdit(PathKey.forRoiNode(node), EditMode.SPLIT_EDIT, this);
-        if (splitSessionId == null) {
-            JOptionPane.showMessageDialog(this,
-                    "\"" + node.getName() + "\" is already being edited in another window.",
-                    "Split Locked", JOptionPane.WARNING_MESSAGE);
-            return false;
-        }
-        splitNode = node;
-        splitOriginalRoi = (Roi) roi.clone();
         chkReplaceOriginal.setSelected(false);
         syncImagePositionToSelection();
-        boundImage.setRoi((Roi) roi.clone());
-        SelectionEditToolsDialog.clearPendingSplitParts(boundImage);
+        if (!splitWorkflow.start(this, node, roi, boundImage, OpenViewRegistry.getInstance())) {
+            return false;
+        }
         updateEditControls();
         return true;
     }
 
     private void cancelSplitMode() {
         if (!isSplitModeActive()) return;
-        SelectionEditToolsDialog.clearPendingSplitParts(boundImage);
-        if (boundImage != null && splitOriginalRoi != null) {
-            boundImage.setRoi((Roi) splitOriginalRoi.clone());
-        }
-        OpenViewRegistry.getInstance().endEdit(splitSessionId);
-        splitNode = null;
-        splitSessionId = null;
-        splitOriginalRoi = null;
+        splitWorkflow.cancel(boundImage, OpenViewRegistry.getInstance());
         chkReplaceOriginal.setSelected(false);
+        clearActiveImageSelection();
         updateEditControls();
         refreshOverlay();
     }
 
     private void cmdSaveSplitMode() {
-        if (!isSplitModeActive() || boundImage == null || splitNode == null) return;
+        if (!isSplitModeActive() || boundImage == null || splitWorkflow.getNode() == null) return;
         Roi current = boundImage.getRoi();
-        List<Roi> parts = SelectionEditToolsDialog.consumePendingSplitParts(boundImage, current);
+        List<Roi> parts = SplitToolsDialog.consumePendingSplitParts(boundImage, current);
         if (parts == null || parts.size() < 2) {
             JOptionPane.showMessageDialog(this, "No split result is ready. Run Knife or Seed Split first.",
                     "Save Split Results", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        OpenViewRegistry.EditSession session = OpenViewRegistry.getInstance().getSession(splitSessionId);
-        if (session != null && session.getState() == OpenViewRegistry.EditState.DELETED && chkReplaceOriginal.isSelected()) {
+        splitWorkflow.setReplaceOriginal(chkReplaceOriginal.isSelected());
+        OpenViewRegistry.EditSession session = splitWorkflow.getRegistrySession(OpenViewRegistry.getInstance());
+        if (session != null && session.getState() == OpenViewRegistry.EditState.DELETED && splitWorkflow.isReplaceOriginal()) {
+            splitWorkflow.setReplaceOriginal(false);
             chkReplaceOriginal.setSelected(false);
         }
-        Path currentPath = OpenViewRegistry.getInstance().getEditPath(splitSessionId);
-        if (currentPath != null) splitNode.setPath(currentPath);
+        splitWorkflow.syncNodePath(OpenViewRegistry.getInstance());
+        RoiNode splitNode = splitWorkflow.getNode();
         String baseName = splitNode.getPath().getFileName().toString();
         if (baseName.toLowerCase().endsWith(".roi")) baseName = baseName.substring(0, baseName.length() - 4);
         final String splitBaseName = baseName;
         final List<Roi> splitParts = new ArrayList<>(parts);
-        final boolean replaceOriginal = chkReplaceOriginal.isSelected();
+        final boolean replaceOriginal = splitWorkflow.isReplaceOriginal();
         try {
             executeUndoable("Save Split Results",
                     Collections.singletonList(splitNode.isZipEntry() && splitNode.getContainingZip() != null
@@ -1185,12 +1665,9 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
                             : (splitNode.getParent() != null ? splitNode.getParent().getPath() : splitNode.getPath().getParent())),
                     Collections.singletonList(splitNode.getPath()),
                     () -> diskSync.saveRoiSplit(splitNode, splitParts, splitBaseName, replaceOriginal, OpenViewRegistry.getInstance()));
-            SelectionEditToolsDialog.clearPendingSplitParts(boundImage);
-            OpenViewRegistry.getInstance().endEdit(splitSessionId);
-            splitNode = null;
-            splitSessionId = null;
-            splitOriginalRoi = null;
+            splitWorkflow.finish(boundImage, OpenViewRegistry.getInstance());
             chkReplaceOriginal.setSelected(false);
+            clearActiveImageSelection();
             updateEditControls();
             reloadFromDisk();
         } catch (IOException e) {
@@ -1285,11 +1762,13 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         menu.addSeparator();
         addMenuItem(menu, "Combine", e -> cmdCombine()).setEnabled(multiRoi && sel.size() >= 2);
         addMenuItem(menu, "Split", e -> cmdSplit()).setEnabled(singleRoi);
+        addMenuItem(menu, "3D Watershed...", e -> cmd3DWatershed())
+                .setEnabled(boundImage != null && !splitting && (hasFolder || multiRoi));
         JMenu splitToolsMenu = new JMenu("Split Tools");
-        addMenuItem(splitToolsMenu, "Knife", e -> cmdSelectionTool(SelectionEditToolsDialog.Tool.KNIFE)).setEnabled(selectionToolsEnabled);
-        addMenuItem(splitToolsMenu, "Seed Split", e -> cmdSelectionTool(SelectionEditToolsDialog.Tool.SEED_SPLIT)).setEnabled(selectionToolsEnabled);
+        addMenuItem(splitToolsMenu, "Knife", e -> cmdSplitTool(SplitToolsDialog.Tool.KNIFE)).setEnabled(selectionToolsEnabled);
+        addMenuItem(splitToolsMenu, "Seed Split", e -> cmdSplitTool(SplitToolsDialog.Tool.SEED_SPLIT)).setEnabled(selectionToolsEnabled);
         menu.add(splitToolsMenu);
-        addMenuItem(menu, "Cleanup...", e -> cmdSelectionTool(SelectionEditToolsDialog.Tool.KEEP_LARGEST)).setEnabled(editCtrl.isEditing());
+        addMenuItem(menu, "Cleanup...", e -> cmdCleanupTool(SelectionEditToolsDialog.Tool.KEEP_LARGEST)).setEnabled(editCtrl.isEditing());
         menu.addSeparator();
         addMenuItem(menu, "Properties...", e -> cmdProperties()).setEnabled(!sel.isEmpty() && !splitting);
         JMenu visibilityMenu = new JMenu("Visibility");
@@ -1889,6 +2368,12 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         return DiskSyncService.uniquePath(zipPath.getParent().resolve(folderName));
     }
 
+    private static String stripRoiExt(String name) {
+        return name != null && name.toLowerCase().endsWith(".roi")
+                ? name.substring(0, name.length() - 4)
+                : name;
+    }
+
     private String buildCopyName(String name) {
         String base = name;
         String ext = "";
@@ -1929,11 +2414,39 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         return pruned;
     }
 
-    private void restoreSelection(List<Path> paths) {
+    private int restoreSelection(List<Path> paths) {
         int[] rows = tableModel.restoreSelection(paths);
         table.clearSelection();
         for (int row : rows) table.addRowSelectionInterval(row, row);
         syncImagePositionToSelection();
+        return rows.length;
+    }
+
+    private void queueSelectionRestore(List<Path> paths) {
+        if (paths == null || paths.isEmpty()) {
+            pendingSelectionRestorePaths = Collections.emptyList();
+            return;
+        }
+        pendingSelectionRestorePaths = new ArrayList<Path>(paths);
+    }
+
+    private void attemptPendingSelectionRestore(List<Path> targetSelection) {
+        int restored = restoreSelection(targetSelection);
+        if (restored > 0) {
+            pendingSelectionRestorePaths = Collections.emptyList();
+            return;
+        }
+        if (targetSelection == null || targetSelection.isEmpty()) return;
+        // zip/unzip triggers multiple path change notifications; retry once after the
+        // current UI update settles so the transformed node can be reloaded first.
+        pendingSelectionRestorePaths = new ArrayList<Path>(targetSelection);
+        SwingUtilities.invokeLater(() -> {
+            if (pendingSelectionRestorePaths.isEmpty()) return;
+            int delayedRestored = restoreSelection(pendingSelectionRestorePaths);
+            if (delayedRestored > 0) {
+                pendingSelectionRestorePaths = Collections.emptyList();
+            }
+        });
     }
 
     private void updateStatus() {
@@ -2017,6 +2530,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         for (RoiNode node : selResolver.resolveRoiNodes(Collections.<ExplorerNode>emptyList(), root)) {
             if (node.isHidden()) continue;
             if (editCtrl.isEditing() && node == editingNode) continue;
+            if (isHiddenByWatershedPreview(node)) continue;
             Roi roi = node.getRoi();
             if (roi == null || !matchesProjection(roi, boundImage)) continue;
             Roi copy = (Roi) roi.clone();
@@ -2029,6 +2543,7 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         for (RoiNode node : getSelectedRoiNodesOnly()) {
             if (node.isHidden()) continue;
             if (editCtrl.isEditing() && node == editingNode) continue;
+            if (isHiddenByWatershedPreview(node)) continue;
             Roi highlight = createHighlightRoi(node, SELECTED_OVERLAY_COLOR, 1.25f);
             if (highlight != null) overlay.add(highlight);
         }
@@ -2038,6 +2553,9 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         }
         Roi pickHighlight = createHighlightRoi(hoveredPickNode, PICK_OVERLAY_COLOR, 1.5f);
         if (pickHighlight != null) overlay.add(pickHighlight);
+        if (watershed3dPreview != null) {
+            add3DWatershedPreviewOverlay(overlay);
+        }
         boundImage.setOverlay(overlay.size() > 0 ? overlay : null);
         LAST_IMAGE_POSITIONS.put(boundImage, currentImagePosition(boundImage));
         boundImage.updateAndDraw();
@@ -2051,6 +2569,51 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
         return matchesProjected(projectTime, roi.getTPosition(), imp.getT(), imp.getNFrames())
                 && matchesProjected(projectZ, roi.getZPosition(), imp.getZ(), imp.getNSlices())
                 && matchesProjected(projectChannel, roi.getCPosition(), imp.getC(), imp.getNChannels());
+    }
+
+    private void add3DWatershedPreviewOverlay(Overlay overlay) {
+        if (watershed3dPreview == null) return;
+        for (Roi roi : watershed3dPreview.getThresholdMaskRois()) {
+            // Original ROI boundary already shows the domain. Keep threshold mask
+            // out of the overlay so only seeds/results add extra signal.
+        }
+        for (List<Roi> rois : watershed3dPreview.getSeedRoisByLabel().values()) {
+            for (Roi roi : rois) {
+                if (roi == null || !matchesProjection(roi, boundImage)) continue;
+                Roi copy = (Roi) roi.clone();
+                applyProjectionPosition(copy, boundImage);
+                copy.setFillColor(null);
+                copy.setStrokeColor(watershed3dSeedPreviewColor);
+                overlay.add(copy);
+            }
+        }
+        if (!watershed3dPreview.canRunWatershed()) {
+            return;
+        }
+        Color[] colors = new Color[]{
+                new Color(255, 140, 0, 220),
+                new Color(0, 170, 220, 220),
+                new Color(80, 200, 120, 220),
+                new Color(220, 80, 120, 220),
+                new Color(180, 120, 255, 220)
+        };
+        int labelIndex = 0;
+        for (List<Roi> rois : watershed3dPreview.getRoisByLabel().values()) {
+            Color color = colors[labelIndex % colors.length];
+            labelIndex++;
+            for (Roi roi : rois) {
+                if (roi == null || !matchesProjection(roi, boundImage)) continue;
+                Roi copy = (Roi) roi.clone();
+                applyProjectionPosition(copy, boundImage);
+                copy.setFillColor(null);
+                copy.setStrokeColor(color);
+                overlay.add(copy);
+            }
+        }
+    }
+
+    private boolean isHiddenByWatershedPreview(RoiNode node) {
+        return false;
     }
 
     private void applyProjectionPosition(Roi roi, ImagePlus imp) {
@@ -2378,6 +2941,9 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     }
 
     private void selectNodeInTree(ExplorerNode node, boolean additive) {
+        // Pick ROI can target ZIP entries or other nodes under collapsed parents.
+        // Expand the ancestor path first so the target row actually exists.
+        tableModel.expandPathTo(node);
         int row = tableModel.getRowOf(node);
         if (row < 0) return;
         if (!additive) table.clearSelection();
@@ -2410,4 +2976,29 @@ public class RoiExplorerWindow extends JFrame implements RoiEditController.EditH
     private void showError(String msg, Exception e) {
         JOptionPane.showMessageDialog(this, msg + "\n" + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
     }
+
+    private static final class Watershed3DSelection {
+        private final List<RoiNode> roiNodes;
+        private final Path outputParent;
+        private final String baseName;
+        private final List<Path> originalRoiPaths;
+        private final Path originalFolderPath;
+        private final Path originalZipPath;
+        private final int defaultCPosition;
+        private final int defaultTPosition;
+
+        private Watershed3DSelection(List<RoiNode> roiNodes, Path outputParent, String baseName,
+                                     List<Path> originalRoiPaths, Path originalFolderPath, Path originalZipPath,
+                                     int defaultCPosition, int defaultTPosition) {
+            this.roiNodes = roiNodes;
+            this.outputParent = outputParent;
+            this.baseName = baseName;
+            this.originalRoiPaths = originalRoiPaths;
+            this.originalFolderPath = originalFolderPath;
+            this.originalZipPath = originalZipPath;
+            this.defaultCPosition = defaultCPosition;
+            this.defaultTPosition = defaultTPosition;
+        }
+    }
+
 }

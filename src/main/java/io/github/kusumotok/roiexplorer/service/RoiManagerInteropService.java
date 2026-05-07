@@ -9,7 +9,9 @@ import io.github.kusumotok.roiexplorer.OpenViewRegistry;
 import io.github.kusumotok.roiexplorer.model.*;
 
 import java.io.IOException;
+import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 public class RoiManagerInteropService {
@@ -51,5 +53,36 @@ public class RoiManagerInteropService {
         }
         rm.setVisible(true);
         rm.toFront();
+    }
+
+    public List<RoiZipService.RoiEntry> loadZipEntries(File zipFile) throws IOException {
+        RoiManager rm = new RoiManager(true);
+        try {
+            if (!rm.runCommand("Open", zipFile.getAbsolutePath())) {
+                throw new IOException("Failed to open ROI ZIP: " + zipFile.getAbsolutePath());
+            }
+            Roi[] rois = rm.getRoisAsArray();
+            List<RoiZipService.RoiEntry> entries = new ArrayList<>();
+            if (rois == null) {
+                return entries;
+            }
+            for (int i = 0; i < rois.length; i++) {
+                Roi roi = rois[i];
+                if (roi == null) continue;
+                Roi copy = (Roi) roi.clone();
+                String name = copy.getName();
+                if (name == null || name.isEmpty()) {
+                    name = String.format("roi-%04d", i + 1);
+                }
+                if (!name.toLowerCase().endsWith(".roi")) {
+                    name = name + ".roi";
+                }
+                copy.setName(name.substring(0, name.length() - 4));
+                entries.add(new RoiZipService.RoiEntry(name, copy));
+            }
+            return entries;
+        } finally {
+            rm.close();
+        }
     }
 }

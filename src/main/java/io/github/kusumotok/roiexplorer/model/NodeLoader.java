@@ -1,6 +1,8 @@
 package io.github.kusumotok.roiexplorer.model;
 
 import ij.io.RoiDecoder;
+import ij.gui.Roi;
+import io.github.kusumotok.roiexplorer.service.RoiManagerInteropService;
 import io.github.kusumotok.roiexplorer.service.RoiZipService;
 
 import java.io.File;
@@ -13,6 +15,7 @@ import java.util.List;
 public class NodeLoader {
 
     private final RoiZipService roiZipService = new RoiZipService();
+    private final RoiManagerInteropService roiManagerInteropService = new RoiManagerInteropService();
 
     public FolderNode loadFolder(Path root) {
         FolderNode rootNode = new FolderNode(root, null);
@@ -54,19 +57,33 @@ public class NodeLoader {
     }
 
     private void loadZipChildren(ZipNode zipNode, File zipFile) {
-        List<String> names;
         try {
-            names = roiZipService.listEntryNames(zipFile);
+            // ZIP root opening prefers the ImageJ/ROI Manager path because it is much
+            // faster for bulk load. ZIP entry edit/save paths still use RoiZipService
+            // directly, so we keep the fallback reader below for compatibility.
+            List<RoiZipService.RoiEntry> entries = roiManagerInteropService.loadZipEntries(zipFile);
+            entries.sort(Comparator.comparing(e -> e.name.toLowerCase()));
+            for (RoiZipService.RoiEntry entry : entries) {
+                Path virtualPath = zipNode.getPath().resolve(entry.name);
+                Roi roi = entry.roi;
+                RoiNode roiNode = new RoiNode(virtualPath, zipNode, () -> (Roi) roi.clone());
+                roiNode.setRoi(roi);
+                zipNode.addChild(roiNode);
+            }
         } catch (IOException e) {
-            return;
-        }
-        names.sort(String.CASE_INSENSITIVE_ORDER);
-        for (String name : names) {
-            Path virtualPath = zipNode.getPath().resolve(name);
-            RoiNode roiNode = new RoiNode(virtualPath, zipNode, () -> {
-                return roiZipService.loadRoiFromZip(zipFile, name);
-            });
-            zipNode.addChild(roiNode);
+            try {
+                // Fallback to the older direct ZIP reader if ROI Manager based loading
+                // is unavailable for a given file/runtime.
+                List<String> names = roiZipService.listEntryNames(zipFile);
+                names.sort(String.CASE_INSENSITIVE_ORDER);
+                for (String name : names) {
+                    Path virtualPath = zipNode.getPath().resolve(name);
+                    RoiNode roiNode = new RoiNode(virtualPath, zipNode, () -> roiZipService.loadRoiFromZip(zipFile, name));
+                    zipNode.addChild(roiNode);
+                }
+            } catch (IOException ignored) {
+                // Ignore unreadable ZIPs during tree construction.
+            }
         }
     }
 }

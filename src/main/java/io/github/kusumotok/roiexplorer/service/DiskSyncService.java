@@ -327,9 +327,60 @@ public class DiskSyncService {
         return saved;
     }
 
+    public List<Path> saveRoiObjectFolders(Path outputParent,
+                                           String baseName,
+                                           Map<Integer, List<Roi>> roisByLabel,
+                                           boolean replaceOriginal,
+                                           Collection<Path> originalRoiPaths,
+                                           Path originalFolderPath,
+                                           Path originalZipPath,
+                                           OpenViewRegistry registry) throws IOException {
+        if (outputParent == null) throw new IOException("Output parent is required.");
+        if (roisByLabel == null || roisByLabel.isEmpty()) throw new IOException("No 3D watershed ROI objects to save.");
+
+        ArrayList<Path> savedRoots = new ArrayList<Path>();
+        int objectIndex = 1;
+        for (Map.Entry<Integer, List<Roi>> entry : roisByLabel.entrySet()) {
+            List<Roi> rois = entry.getValue();
+            if (rois == null || rois.isEmpty()) continue;
+            String folderName = stripRoiExt(baseName) + "_split_" + String.format("%02d", objectIndex++);
+            Path outFolder = uniquePath(outputParent.resolve(folderName));
+            Files.createDirectories(outFolder);
+            int sliceIndex = 1;
+            for (Roi roi : rois) {
+                if (roi == null) continue;
+                int z = roi.getZPosition() > 0 ? roi.getZPosition() : sliceIndex;
+                String roiName = folderName + "_z" + String.format("%03d", z);
+                Path out = uniquePath(outFolder.resolve(roiName + ".roi"));
+                Roi copy = (Roi) roi.clone();
+                copy.setName(stripRoiExt(out.getFileName().toString()));
+                new RoiEncoder(out.toString()).write(copy);
+                sliceIndex++;
+            }
+            savedRoots.add(outFolder);
+        }
+
+        if (replaceOriginal) {
+            if (originalFolderPath != null) {
+                deleteRecursive(originalFolderPath.toFile());
+                registry.notifyPathDeleted(originalFolderPath);
+            } else if (originalZipPath != null) {
+                Files.deleteIfExists(originalZipPath);
+                registry.notifyPathDeleted(originalZipPath);
+            } else if (originalRoiPaths != null) {
+                for (Path roiPath : originalRoiPaths) {
+                    Files.deleteIfExists(roiPath);
+                    registry.notifyPathDeleted(roiPath);
+                }
+            }
+        }
+        registry.notifyChildrenChanged(outputParent);
+        return savedRoots;
+    }
+
     // ── ZIP / Unzip ──────────────────────────────────────────────────────────
 
-    public void zipFolder(FolderNode folder, OpenViewRegistry registry) throws IOException {
+    public Path zipFolder(FolderNode folder, OpenViewRegistry registry) throws IOException {
         Path folderPath = folder.getPath();
         Path zipPath = folderPath.getParent().resolve(folderPath.getFileName().toString() + ".zip");
         if (Files.exists(zipPath)) {
@@ -339,9 +390,10 @@ public class DiskSyncService {
         deleteRecursive(folderPath.toFile());
         registry.notifyPathDeleted(folderPath);
         registry.notifyChildrenChanged(folderPath.getParent());
+        return zipPath;
     }
 
-    public void unzipToFolder(ZipNode zipNode, OpenViewRegistry registry) throws IOException {
+    public Path unzipToFolder(ZipNode zipNode, OpenViewRegistry registry) throws IOException {
         Path zipPath = zipNode.getPath();
         String folderName = stripZipExt(zipPath.getFileName().toString());
         Path folderPath = zipPath.getParent().resolve(folderName);
@@ -352,6 +404,7 @@ public class DiskSyncService {
         Files.delete(zipPath);
         registry.notifyPathDeleted(zipPath);
         registry.notifyChildrenChanged(zipPath.getParent());
+        return folderPath;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -400,13 +453,9 @@ public class DiskSyncService {
     }
 
     private List<RoiZipService.RoiEntry> loadZipEntries(File zipFile) throws IOException {
-        List<String> names = roiZipService.listEntryNames(zipFile);
-        List<RoiZipService.RoiEntry> entries = new ArrayList<>();
-        for (String name : names) {
-            Roi roi = roiZipService.loadRoiFromZip(zipFile, name);
-            if (roi != null) entries.add(new RoiZipService.RoiEntry(name, roi));
-        }
-        return entries;
+        // ZIP entry editing paths need all current entries in memory anyway, so use
+        // the single-pass bulk reader instead of repeated entry-by-entry rescans.
+        return roiZipService.loadEntries(zipFile);
     }
 
     private static String uniqueZipEntry(List<RoiZipService.RoiEntry> entries, String preferred) {

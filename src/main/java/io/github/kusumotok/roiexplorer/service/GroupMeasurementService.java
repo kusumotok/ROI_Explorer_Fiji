@@ -8,6 +8,8 @@ import io.github.kusumotok.roiexplorer.model.ExplorerNode;
 import io.github.kusumotok.roiexplorer.model.RoiNode;
 
 import java.awt.Rectangle;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
 
 public class GroupMeasurementService {
@@ -73,6 +75,23 @@ public class GroupMeasurementService {
     private final SelectionResolver resolver = new SelectionResolver();
 
     public void measure(List<ExplorerNode> units, Options opts, ImagePlus imp) {
+        measure(units, opts, imp, true);
+    }
+
+    public ResultsTable measure(List<ExplorerNode> units, Options opts, ImagePlus imp, boolean showResultsTable) {
+        ResultsTable rt = buildResultsTable(units, opts, imp);
+        if (showResultsTable) {
+            rt.show("Folder Results");
+        }
+        return rt;
+    }
+
+    public void saveCsv(ResultsTable resultsTable, Path csvPath) throws IOException {
+        if (resultsTable == null || csvPath == null) return;
+        resultsTable.save(csvPath.toString());
+    }
+
+    private ResultsTable buildResultsTable(List<ExplorerNode> units, Options opts, ImagePlus imp) {
         ResultsTable rt = new ResultsTable();
         ImageState originalState = ImageState.capture(imp);
 
@@ -95,8 +114,7 @@ public class GroupMeasurementService {
         } finally {
             if (originalState != null) originalState.restore(imp);
         }
-
-        rt.show("Folder Results");
+        return rt;
     }
 
     private Map<GroupKey, List<RoiNode>> groupRois(List<RoiNode> rois, Options opts) {

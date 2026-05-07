@@ -81,6 +81,23 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
         fireTableDataChanged();
     }
 
+    public void expandPathTo(ExplorerNode node) {
+        if (node == null) return;
+        boolean changed = false;
+        ExplorerNode current = node.getParent();
+        while (current != null && current != viewRoot) {
+            if (!current.isLeaf() && !current.isExpanded()) {
+                current.setExpanded(true);
+                changed = true;
+            }
+            current = current.getParent();
+        }
+        if (changed) {
+            rebuildVisibleRows();
+            fireTableDataChanged();
+        }
+    }
+
     public void expandAll(ExplorerNode from) {
         expandRecursive(from);
         rebuildVisibleRows();

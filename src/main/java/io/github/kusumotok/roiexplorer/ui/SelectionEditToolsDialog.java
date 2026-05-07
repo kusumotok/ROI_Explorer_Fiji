@@ -845,17 +845,9 @@ public class SelectionEditToolsDialog extends JDialog {
         Rectangle bounds = source.getBounds();
         int w = domain.getWidth();
         int h = domain.getHeight();
-        int size = w * h;
-        int[] seedLabels = new int[size];
-        int nextLabel = 1;
-        for (Point seed : seeds) {
-            if (!bounds.contains(seed)) continue;
-            int sx = seed.x - bounds.x;
-            int sy = seed.y - bounds.y;
-            if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
-            if ((domain.get(sx, sy) & 0xff) == 0) continue;
-            seedLabels[sy * w + sx] = nextLabel++;
-        }
+        SeedLabelBuild seedBuild = buildSeedLabels(bounds, domain, seeds, w, h);
+        int[] seedLabels = seedBuild.seedLabels;
+        int nextLabel = seedBuild.nextLabel;
         if (nextLabel <= 2) return cloneOrNull(source);
 
         FloatProcessor surface = extractSurface(image, bounds, invertMap);
@@ -880,18 +872,9 @@ public class SelectionEditToolsDialog extends JDialog {
         Rectangle bounds = source.getBounds();
         int w = domain.getWidth();
         int h = domain.getHeight();
-        int size = w * h;
-        int[] seedLabels = new int[size];
-        int nextLabel = 1;
-        for (Point seed : seeds) {
-            if (!bounds.contains(seed)) continue;
-            int sx = seed.x - bounds.x;
-            int sy = seed.y - bounds.y;
-            if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
-            if ((domain.get(sx, sy) & 0xff) == 0) continue;
-            if (seedLabels[sy * w + sx] != 0) continue;
-            seedLabels[sy * w + sx] = nextLabel++;
-        }
+        SeedLabelBuild seedBuild = buildSeedLabels(bounds, domain, seeds, w, h);
+        int[] seedLabels = seedBuild.seedLabels;
+        int nextLabel = seedBuild.nextLabel;
         if (nextLabel <= 2) return parts;
         FloatProcessor surface = extractSurface(image, bounds, invertMap);
         int[] labels = runSeededWatershed(surface, domain, seedLabels);
@@ -909,6 +892,24 @@ public class SelectionEditToolsDialog extends JDialog {
             if (part != null) parts.add(part);
         }
         return parts;
+    }
+
+    private static SeedLabelBuild buildSeedLabels(Rectangle bounds, ByteProcessor domain,
+                                                  List<Point> seeds, int w, int h) {
+        int[] seedLabels = new int[w * h];
+        int nextLabel = 1;
+        for (Point seed : seeds) {
+            if (!bounds.contains(seed)) continue;
+            int sx = seed.x - bounds.x;
+            int sy = seed.y - bounds.y;
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+            // Keep the spot quantifier model: the ROI mask is only the watershed
+            // domain/constraint, and explicit seed points alone become markers.
+            if ((domain.get(sx, sy) & 0xff) == 0) continue;
+            if (seedLabels[sy * w + sx] != 0) continue;
+            seedLabels[sy * w + sx] = nextLabel++;
+        }
+        return new SeedLabelBuild(seedLabels, nextLabel);
     }
 
     private static Roi keepLargestPart(Roi source) {
@@ -1101,6 +1102,8 @@ public class SelectionEditToolsDialog extends JDialog {
                 labels[i] = 0;
                 continue;
             }
+            // Voxels inside the domain are not implicit seeds. Only seedLabels[]
+            // may initialize flooding, which prevents the whole mask acting as one seed.
             if (seedLabels[i] > 0) {
                 labels[i] = seedLabels[i];
                 pq.add(new WsNode(i, seedLabels[i], topo[i], seq++));
@@ -1307,6 +1310,16 @@ public class SelectionEditToolsDialog extends JDialog {
             this.label = label;
             this.priority = priority;
             this.seq = seq;
+        }
+    }
+
+    private static final class SeedLabelBuild {
+        final int[] seedLabels;
+        final int nextLabel;
+
+        SeedLabelBuild(int[] seedLabels, int nextLabel) {
+            this.seedLabels = seedLabels;
+            this.nextLabel = nextLabel;
         }
     }
 }
