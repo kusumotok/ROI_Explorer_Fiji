@@ -75,8 +75,8 @@ public class RoiEditController {
 
         Window owner = host.getWindow();
         UUID sessionId = registry.tryStartEdit(PathKey.forRoiNode(node), EditMode.EDIT,
-                owner instanceof io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow
-                        ? (io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow) owner : null);
+                host instanceof io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel
+                        ? (io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel) host : null);
         if (sessionId == null) {
             JOptionPane.showMessageDialog(host.getWindow(),
                     "\"" + node.getName() + "\" is already being edited in another window.",

@@ -1,7 +1,7 @@
 package io.github.kusumotok.roiexplorer;
 
 import io.github.kusumotok.roiexplorer.model.RoiNode;
-import io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow;
+import io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -158,7 +158,7 @@ public class OpenViewRegistry {
         private final UUID editSessionId;
         private final EditMode mode;
         private final int ownerWindowId;
-        private final RoiExplorerWindow ownerWindow;
+        private final RoiExplorerPanel ownerWindow;
         private final Path startPath;
         private Path currentPath;
         private final Revision baseRevision;
@@ -168,7 +168,7 @@ public class OpenViewRegistry {
         private Path zipContainerPath;
         private String zipEntryName;
 
-        private EditSession(UUID editSessionId, EditMode mode, RoiExplorerWindow ownerWindow,
+        private EditSession(UUID editSessionId, EditMode mode, RoiExplorerPanel ownerWindow,
                             PathKey key, Revision baseRevision) {
             this.editSessionId = editSessionId;
             this.mode = mode;
@@ -196,7 +196,7 @@ public class OpenViewRegistry {
             return ownerWindowId;
         }
 
-        public RoiExplorerWindow getOwnerWindow() {
+        public RoiExplorerPanel getOwnerWindow() {
             return ownerWindow;
         }
 
@@ -256,7 +256,7 @@ public class OpenViewRegistry {
 
     private static final OpenViewRegistry INSTANCE = new OpenViewRegistry();
 
-    private final List<RoiExplorerWindow> windows = new ArrayList<>();
+    private final List<RoiExplorerPanel> windows = new ArrayList<>();
     private final Map<UUID, EditSession> sessionsById = new HashMap<>();
     private final Map<PathKey, UUID> activeSessionByPath = new HashMap<>();
     private final Set<Path> hiddenRois = new HashSet<>();
@@ -267,13 +267,13 @@ public class OpenViewRegistry {
         return INSTANCE;
     }
 
-    public void register(RoiExplorerWindow window) {
+    public void register(RoiExplorerPanel window) {
         if (!windows.contains(window)) {
             windows.add(window);
         }
     }
 
-    public void unregister(RoiExplorerWindow window) {
+    public void unregister(RoiExplorerPanel window) {
         windows.remove(window);
         List<UUID> ownedSessions = new ArrayList<>();
         for (Map.Entry<UUID, EditSession> entry : sessionsById.entrySet()) {
@@ -286,7 +286,7 @@ public class OpenViewRegistry {
         }
     }
 
-    public UUID tryStartEdit(PathKey key, EditMode mode, RoiExplorerWindow window) {
+    public UUID tryStartEdit(PathKey key, EditMode mode, RoiExplorerPanel window) {
         if (key == null || activeSessionByPath.containsKey(key)) return null;
         UUID sessionId = UUID.randomUUID();
         EditSession session = new EditSession(sessionId, mode, window, key, Revision.forPathKey(key));
@@ -329,7 +329,7 @@ public class OpenViewRegistry {
     }
 
     public void notifyChildrenChanged(Path folderPath) {
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.onExternalChange(folderPath);
         }
     }
@@ -337,7 +337,7 @@ public class OpenViewRegistry {
     public void notifyPathRenamed(Path oldPath, Path newPath) {
         moveHiddenPathPrefix(oldPath, newPath);
         moveFsSessionsByPrefix(oldPath, newPath);
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.onPathRenamed(oldPath, newPath);
         }
     }
@@ -360,7 +360,7 @@ public class OpenViewRegistry {
                 activeSessionByPath.put(newKey, sessionId);
             }
         }
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.onPathRenamed(oldKey.getCurrentPath(), newKey.getCurrentPath());
         }
     }
@@ -368,7 +368,7 @@ public class OpenViewRegistry {
     public void notifyPathDeleted(Path path) {
         clearHiddenInSubtree(path);
         clearFsSessionsInSubtree(path);
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.onPathDeleted(path);
         }
     }
@@ -386,17 +386,17 @@ public class OpenViewRegistry {
                 session.markDeleted();
             }
         }
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.onPathDeleted(key.getCurrentPath());
         }
     }
 
-    public List<RoiExplorerWindow> getWindows() {
+    public List<RoiExplorerPanel> getPanels() {
         return Collections.unmodifiableList(windows);
     }
 
     public void refreshOverlaysFor(ij.ImagePlus image) {
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             if (w.getBoundImage() == image) {
                 w.refreshOverlay();
             }
@@ -404,7 +404,7 @@ public class OpenViewRegistry {
     }
 
     public void refreshAllWindows() {
-        for (RoiExplorerWindow w : new ArrayList<>(windows)) {
+        for (RoiExplorerPanel w : new ArrayList<>(windows)) {
             w.reloadFromDisk();
         }
     }

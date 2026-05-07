@@ -3,6 +3,7 @@ package io.github.kusumotok.roiexplorer.service;
 import ij.ImagePlus;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry;
 import io.github.kusumotok.roiexplorer.service.measure.MeasurementProfile;
+import io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel;
 import io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow;
 
 import javax.swing.*;
@@ -33,6 +34,12 @@ public class RoiExplorerFacade {
 
     public synchronized boolean hasWindow() {
         return getWindow() != null;
+    }
+
+    /** Returns the embedded panel, or null if no window is open. */
+    public synchronized RoiExplorerPanel getPanel() {
+        RoiExplorerWindow w = getWindow();
+        return w != null ? w.getPanel() : null;
     }
 
     public synchronized boolean hasLoadedRoot() {

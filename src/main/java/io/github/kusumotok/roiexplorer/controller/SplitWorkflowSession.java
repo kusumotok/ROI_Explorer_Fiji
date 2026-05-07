@@ -6,6 +6,7 @@ import io.github.kusumotok.roiexplorer.OpenViewRegistry;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry.EditMode;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry.PathKey;
 import io.github.kusumotok.roiexplorer.model.RoiNode;
+import io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel;
 import io.github.kusumotok.roiexplorer.ui.SplitToolsDialog;
 
 import javax.swing.*;
@@ -46,11 +47,9 @@ public final class SplitWorkflowSession {
         this.replaceOriginal = replaceOriginal;
     }
 
-    public boolean start(Window owner, RoiNode targetNode, Roi roi, ImagePlus image, OpenViewRegistry registry) {
+    public boolean start(RoiExplorerPanel owner, RoiNode targetNode, Roi roi, ImagePlus image, OpenViewRegistry registry) {
         if (isActive()) return true;
-        UUID startedSessionId = registry.tryStartEdit(PathKey.forRoiNode(targetNode), EditMode.SPLIT_EDIT,
-                owner instanceof io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow
-                        ? (io.github.kusumotok.roiexplorer.ui.RoiExplorerWindow) owner : null);
+        UUID startedSessionId = registry.tryStartEdit(PathKey.forRoiNode(targetNode), EditMode.SPLIT_EDIT, owner);
         if (startedSessionId == null) {
             JOptionPane.showMessageDialog(owner,
                     "\"" + targetNode.getName() + "\" is already being edited in another window.",
