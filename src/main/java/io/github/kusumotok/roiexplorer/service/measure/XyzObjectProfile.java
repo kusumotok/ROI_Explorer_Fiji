@@ -13,6 +13,19 @@ public final class XyzObjectProfile implements MeasurementProfile {
 
     public static final String ID = "xyz_object";
 
+    private final Set<MeasurementColumn> enabled;
+
+    /** All columns enabled (default). */
+    public XyzObjectProfile() {
+        this.enabled = MeasurementColumn.allEnabled();
+    }
+
+    /** Only compute and return the specified columns. */
+    public XyzObjectProfile(Set<MeasurementColumn> enabled) {
+        this.enabled = (enabled != null && !enabled.isEmpty())
+            ? EnumSet.copyOf(enabled) : MeasurementColumn.allEnabled();
+    }
+
     @Override
     public String id() { return ID; }
 
@@ -28,6 +41,16 @@ public final class XyzObjectProfile implements MeasurementProfile {
         double vh = cal != null && cal.pixelHeight > 0 ? cal.pixelHeight : 1.0;
         double vd = cal != null && cal.pixelDepth  > 0 ? cal.pixelDepth  : 1.0;
 
+        // Decide what to compute based on enabled columns
+        boolean needIntensity = enabled.contains(MeasurementColumn.INTEGRATED_INTENSITY)
+            || enabled.contains(MeasurementColumn.MEAN_INTENSITY)
+            || enabled.contains(MeasurementColumn.MAX_INTENSITY);
+        boolean needCentroid  = enabled.contains(MeasurementColumn.CENTROID);
+        boolean needSurface   = enabled.contains(MeasurementColumn.SURFACE_AREA)
+            || enabled.contains(MeasurementColumn.SPHERICITY);
+        boolean needFeret     = enabled.contains(MeasurementColumn.MAX_FERET3D)
+            || enabled.contains(MeasurementColumn.FERET_ENDPOINTS);
+
         int imageWidth  = image.getWidth();
         int imageHeight = image.getHeight();
 
@@ -39,6 +62,9 @@ public final class XyzObjectProfile implements MeasurementProfile {
         double sumIntensity = 0;
         double maxIntensity = Double.NEGATIVE_INFINITY;
 
+        int safeC = Math.max(1, Math.min(c, image.getNChannels()));
+        int safeT = Math.max(1, Math.min(t, image.getNFrames()));
+
         for (RoiNode node : unit.getRois()) {
             int z = resolveZ(node, image);
             if (z <= 0 || z > image.getNSlices()) {
@@ -49,23 +75,28 @@ public final class XyzObjectProfile implements MeasurementProfile {
             Roi roi = node.getRoi();
             if (roi == null) continue;
 
-            int safeC = Math.max(1, Math.min(c, image.getNChannels()));
-            int safeT = Math.max(1, Math.min(t, image.getNFrames()));
-            int stackIndex = image.getStackIndex(safeC, z, safeT);
-            ImageProcessor ip = image.getStack().getProcessor(stackIndex);
+            // Only acquire pixel values when intensity columns are enabled
+            ImageProcessor ip = needIntensity
+                ? image.getStack().getProcessor(image.getStackIndex(safeC, z, safeT))
+                : null;
 
             Rectangle bounds = roi.getBounds();
             for (int py = bounds.y; py < bounds.y + bounds.height; py++) {
                 for (int px = bounds.x; px < bounds.x + bounds.width; px++) {
                     if (!roi.contains(px, py)) continue;
+                    // voxelSet needed for volume; also for surface/feret if required
                     long key = encodeVoxel(px, py, z, imageWidth, imageHeight);
                     if (!voxelSet.add(key)) continue;
-                    double value = ip.getPixelValue(px, py);
-                    sumX         += (px + 0.5) * vw;
-                    sumY         += (py + 0.5) * vh;
-                    sumZ         += (z  - 0.5) * vd;
-                    sumIntensity += value;
-                    if (value > maxIntensity) maxIntensity = value;
+                    if (needIntensity && ip != null) {
+                        double value = ip.getPixelValue(px, py);
+                        sumIntensity += value;
+                        if (value > maxIntensity) maxIntensity = value;
+                    }
+                    if (needCentroid) {
+                        sumX += (px + 0.5) * vw;
+                        sumY += (py + 0.5) * vh;
+                        sumZ += (z  - 0.5) * vd;
+                    }
                 }
             }
         }
@@ -77,12 +108,15 @@ public final class XyzObjectProfile implements MeasurementProfile {
         }
 
         double volumeUm3   = nVox * vw * vh * vd;
-        double surfaceArea = computeSurfaceArea(voxelSet, imageWidth, imageHeight, vw, vh, vd);
+        double surfaceArea = needSurface
+            ? computeSurfaceArea(voxelSet, imageWidth, imageHeight, vw, vh, vd) : 0.0;
         double sphericity  = 0.0;
-        if (surfaceArea > 0.0) {
+        if (needSurface && surfaceArea > 0.0) {
             sphericity = Math.cbrt(Math.PI) * Math.pow(6.0 * volumeUm3, 2.0 / 3.0) / surfaceArea;
         }
-        FeretResult feret = computeFeret(voxelSet, imageWidth, imageHeight, vw, vh, vd);
+        FeretResult feret = needFeret
+            ? computeFeret(voxelSet, imageWidth, imageHeight, vw, vh, vd)
+            : new FeretResult(0, 0, 0, 0, 0, 0, 0);
 
         ObjectMeasurementResult result = new ObjectMeasurementResult.Builder()
             .spotId(0)

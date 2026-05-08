@@ -252,7 +252,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         }
 
         if (request.getProfile() != null) {
-            List<ExplorerNode> sel = getSelectedNodes();
+            // measureAll=true ignores current selection → uses all direct children of root
+            List<ExplorerNode> sel = request.isMeasureAll()
+                ? Collections.<ExplorerNode>emptyList() : getSelectedNodes();
             List<ObjectMeasurementResult> results;
             try {
                 results = objectMeasureSvc.measure(sel, tableModel.getViewRoot(), request.getProfile(), boundImage);
@@ -264,7 +266,8 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             }
             if (request.getCsvOutputPath() != null) {
                 try {
-                    objectMeasureCsvExporter.write(results, request.getCsvOutputPath());
+                    objectMeasureCsvExporter.write(results, request.getCsvOutputPath(),
+                            request.getEnabledColumns());
                 } catch (IOException e) {
                     return MeasurementResult.notPerformed("Failed to save measurement CSV: " + e.getMessage());
                 }
