@@ -3151,6 +3151,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         boolean additive = e.isShiftDown() || e.isControlDown() || e.isMetaDown();
         selectNodeInTree(hoveredPickNode, additive);
         if (e.getClickCount() >= 2) cmdEdit();
+        uninstallPickMode();
         e.consume();
     }
 
