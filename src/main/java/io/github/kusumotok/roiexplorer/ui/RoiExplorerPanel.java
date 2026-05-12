@@ -308,6 +308,13 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         refreshOverlay();
     }
 
+    public void setProjectionMode(boolean projectC, boolean projectZ, boolean projectT) {
+        projectChannel = projectC;
+        this.projectZ = projectZ;
+        projectTime = projectT;
+        refreshOverlay();
+    }
+
     public boolean ownsImage(ImagePlus image) {
         return image != null && (image == boundImage || image == subImage);
     }
