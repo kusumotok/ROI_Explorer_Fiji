@@ -74,6 +74,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private final JButton btnDeselect     = new JButton("Deselect");
     private final JButton btnMore         = new JButton("More >>");
     private final JButton btnBindImage    = new JButton("Bind");
+    private final JButton btnBindSubImage = new JButton("Bind Sub");
+    private final JButton btnClearSubImage = new JButton("Clear Sub");
+    private final JCheckBox chkContainerOr = new JCheckBox("Container OR");
 
     // Edit-mode buttons
     private final JButton btnSave         = new JButton("Save");
@@ -87,6 +90,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     // ── Header labels ─────────────────────────────────────────────────────────
     private final JLabel rootPathLabel   = new JLabel("No folder open");
     private final JLabel boundImageLabel = new JLabel("No image");
+    private final JLabel subImageLabel   = new JLabel("No sub image");
     private JPanel editModePanel;
     private JPanel centerWrapper;
     private JPopupMenu moreMenu;
@@ -94,6 +98,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     // ── Status ────────────────────────────────────────────────────────────────
     private final JLabel statusLabel = new JLabel("0 ROI");
     private ImagePlus boundImage;
+    private ImagePlus subImage;
     private Path viewRootPath;
     private final SplitWorkflowSession splitWorkflow = new SplitWorkflowSession();
     private JDialog watershed3dDialog;
@@ -113,11 +118,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private boolean projectTime;
     private List<Path> pendingSelectionRestorePaths = Collections.emptyList();
     private boolean pickMode;
-    private RoiNode hoveredPickNode;
-    private java.util.List<RoiNode> pickCandidates = Collections.emptyList();
+    private ExplorerNode hoveredPickNode;
+    private java.util.List<ExplorerNode> pickCandidates = Collections.emptyList();
     private int pickCandidateIndex;
     private Point pickPoint;
-    private ImageCanvas pickCanvas;
+    private final java.util.List<ImageCanvas> pickCanvases = new ArrayList<ImageCanvas>();
     private MouseAdapter pickListener;
     private KeyAdapter imageShortcutListener;
     private ImagePlus shortcutBoundImage;
@@ -191,6 +196,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         uninstallPickMode();
         uninstallImageShortcuts();
         cancelSplitMode();
+        clearSubOverlay();
         OpenViewRegistry.getInstance().unregister(this);
     }
 
@@ -246,6 +252,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         } else if (boundImage != null) {
             boundImage.killRoi();
             boundImage.setOverlay((Overlay) null);
+            clearSubOverlay();
             boundImage.updateAndDraw();
         }
         refreshOverlay();
@@ -254,6 +261,55 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     public void setBindImage(ImagePlus imp) {
         if (imp == null) return;
         bindImage(imp);
+    }
+
+    public void setSubBindImage(ImagePlus imp) {
+        if (imp == null) {
+            clearSubBindImage();
+            return;
+        }
+        if (boundImage == null) {
+            JOptionPane.showMessageDialog(this, "Bind a main image before binding a sub image.",
+                    "Bind Sub Image", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (imp.getWidth() != boundImage.getWidth() || imp.getHeight() != boundImage.getHeight()) {
+            JOptionPane.showMessageDialog(this,
+                    "Sub image XY pixel size must match the main image.",
+                    "Bind Sub Image", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (subImage == imp) {
+            refreshOverlay();
+            return;
+        }
+        if (!sameXyCalibration(boundImage, imp)) {
+            JOptionPane.showMessageDialog(this,
+                    "Sub image XY calibration differs from the main image. Binding is allowed because pixel size matches.",
+                    "Bind Sub Image", JOptionPane.WARNING_MESSAGE);
+        }
+        if (subImage != imp) clearSubOverlay();
+        subImage = imp;
+        subImageLabel.setText("Sub: " + imp.getTitle());
+        subImageLabel.setToolTipText(imp.getTitle());
+        refreshOverlay();
+    }
+
+    public void clearSubBindImage() {
+        clearSubOverlay();
+        subImage = null;
+        subImageLabel.setText("No sub image");
+        subImageLabel.setToolTipText(null);
+        refreshOverlay();
+    }
+
+    public void setContainerOrMode(boolean enabled) {
+        chkContainerOr.setSelected(enabled);
+        refreshOverlay();
+    }
+
+    public boolean ownsImage(ImagePlus image) {
+        return image != null && (image == boundImage || image == subImage);
     }
 
     public void measureCurrentRoot() {
@@ -628,9 +684,23 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         imageRow.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
         boundImageLabel.setFont(boundImageLabel.getFont().deriveFont(Font.PLAIN, 11f));
         imageRow.add(boundImageLabel, BorderLayout.CENTER);
-        makeCompact(btnBindImage);
-        imageRow.add(btnBindImage, BorderLayout.EAST);
+        makeCompact(btnBindImage, btnBindSubImage, btnClearSubImage);
+        final JPanel imageBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        imageBtns.add(btnBindImage);
+        imageBtns.add(btnBindSubImage);
+        imageBtns.add(btnClearSubImage);
+        imageRow.add(imageBtns, BorderLayout.EAST);
         header.add(imageRow);
+
+        // Row 3: sub image + Container OR
+        final JPanel subRow = new JPanel(new BorderLayout(4, 0));
+        subRow.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
+        subImageLabel.setFont(subImageLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        subRow.add(subImageLabel, BorderLayout.CENTER);
+        chkContainerOr.setFont(chkContainerOr.getFont().deriveFont(Font.PLAIN, 11f));
+        chkContainerOr.setFocusable(false);
+        subRow.add(chkContainerOr, BorderLayout.EAST);
+        header.add(subRow);
 
         wireButtons();
         return header;
@@ -703,6 +773,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         btnDeselect.addActionListener(e -> table.clearSelection());
         btnMore.addActionListener(e -> showMoreMenu());
         btnBindImage.addActionListener(e -> cmdBindImage());
+        btnBindSubImage.addActionListener(e -> cmdBindSubImage());
+        btnClearSubImage.addActionListener(e -> clearSubBindImage());
+        chkContainerOr.addActionListener(e -> refreshOverlay());
         btnSave.addActionListener(e -> {
             if (isSplitModeActive()) cmdSaveSplitMode();
             else editCtrl.save(diskSync, historySvc, OpenViewRegistry.getInstance());
@@ -1640,6 +1713,15 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         bindImage(imp);
     }
 
+    private void cmdBindSubImage() {
+        ImagePlus imp = ij.WindowManager.getCurrentImage();
+        if (imp == null) {
+            JOptionPane.showMessageDialog(this, "No image is open in Fiji.", "Bind Sub Image", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        setSubBindImage(imp);
+    }
+
     private boolean isSplitModeActive() {
         return splitWorkflow.isActive();
     }
@@ -2565,63 +2647,61 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     public void refreshOverlay() {
-        if (boundImage == null) return;
+        if (boundImage == null && subImage == null) return;
         if (overlayRefreshing) return;
         overlayRefreshing = true;
         try {
-        ExplorerNode root = tableModel.getViewRoot();
-        if (root == null) {
-            boundImage.setOverlay((Overlay) null);
-            LAST_IMAGE_POSITIONS.put(boundImage, currentImagePosition(boundImage));
-            return;
-        }
-        Overlay overlay = new Overlay();
-        RoiNode editingNode = editCtrl.getEditingNode();
-        for (RoiNode node : selResolver.resolveRoiNodes(Collections.<ExplorerNode>emptyList(), root)) {
-            if (node.isHidden()) continue;
-            if (editCtrl.isEditing() && node == editingNode) continue;
-            if (isHiddenByWatershedPreview(node)) continue;
-            Roi roi = node.getRoi();
-            if (roi == null || !matchesProjection(roi, boundImage)) continue;
-            Roi copy = (Roi) roi.clone();
-            applyProjectionPosition(copy, boundImage);
-            if (copy.getName() == null || copy.getName().isEmpty()) {
-                copy.setName(node.getName());
-            }
-            overlay.add(copy);
-        }
-        for (RoiNode node : getSelectedRoiNodesOnly()) {
-            if (node.isHidden()) continue;
-            if (editCtrl.isEditing() && node == editingNode) continue;
-            if (isHiddenByWatershedPreview(node)) continue;
-            Roi highlight = createHighlightRoi(node, SELECTED_OVERLAY_COLOR, 1.25f);
-            if (highlight != null) overlay.add(highlight);
-        }
-        if (editCtrl.isEditing()) {
-            Roi reference = createEditReferenceRoi();
-            if (reference != null) overlay.add(reference);
-        }
-        Roi pickHighlight = createHighlightRoi(hoveredPickNode, PICK_OVERLAY_COLOR, 1.5f);
-        if (pickHighlight != null) overlay.add(pickHighlight);
-        if (watershed3dPreview != null) {
-            add3DWatershedPreviewOverlay(overlay);
-        }
-        boundImage.setOverlay(overlay.size() > 0 ? overlay : null);
-        LAST_IMAGE_POSITIONS.put(boundImage, currentImagePosition(boundImage));
-        boundImage.updateAndDraw();
+            refreshOverlayForView(mainView());
+            refreshOverlayForView(subView());
         } finally {
             overlayRefreshing = false;
         }
     }
 
-    private boolean matchesProjection(Roi roi, ImagePlus imp) {
-        if (!hasStructuredAxes(imp)) return true;
-        return matchesProjected(projectTime, roi.getTPosition(), imp.getT(), imp.getNFrames())
-                && matchesProjected(projectZ, roi.getZPosition(), imp.getZ(), imp.getNSlices())
-                && matchesProjected(projectChannel, roi.getCPosition(), imp.getC(), imp.getNChannels());
+    private void refreshOverlayForView(ImageViewContext view) {
+        if (view == null || view.image == null) return;
+        ExplorerNode root = tableModel.getViewRoot();
+        if (root == null) {
+            view.image.setOverlay((Overlay) null);
+            LAST_IMAGE_POSITIONS.put(view.image, currentImagePosition(view.image));
+            return;
+        }
+        Overlay overlay = new Overlay();
+        RoiNode editingNode = editCtrl.getEditingNode();
+        for (OverlayEntry entry : buildOverlayEntries(root)) {
+            if (entry.target instanceof RoiNode && editCtrl.isEditing() && entry.target == editingNode) continue;
+            for (Roi roi : displayRoisForEntry(entry, view)) {
+                if (roi == null || !matchesProjection(roi, view)) continue;
+                Roi copy = (Roi) roi.clone();
+                applyProjectionPosition(copy, view);
+                if (copy.getName() == null || copy.getName().isEmpty()) copy.setName(entry.target.getName());
+                overlay.add(copy);
+            }
+        }
+        for (ExplorerNode node : getSelectedNodes()) {
+            Roi highlight = createHighlightRoi(node, view, SELECTED_OVERLAY_COLOR, 1.25f);
+            if (highlight != null) overlay.add(highlight);
+        }
+        if (editCtrl.isEditing()) {
+            Roi reference = createEditReferenceRoi(view);
+            if (reference != null) overlay.add(reference);
+        }
+        Roi pickHighlight = createHighlightRoi(hoveredPickNode, view, PICK_OVERLAY_COLOR, 1.5f);
+        if (pickHighlight != null) overlay.add(pickHighlight);
+        if (view.main && watershed3dPreview != null) add3DWatershedPreviewOverlay(overlay, view);
+        view.image.setOverlay(overlay.size() > 0 ? overlay : null);
+        LAST_IMAGE_POSITIONS.put(view.image, currentImagePosition(view.image));
+        view.image.updateAndDraw();
     }
 
-    private void add3DWatershedPreviewOverlay(Overlay overlay) {
+    private boolean matchesProjection(Roi roi, ImageViewContext view) {
+        if (view == null || !hasStructuredAxes(view.image)) return true;
+        return matchesProjected(view.projectT, roi.getTPosition(), view.image.getT(), view.image.getNFrames())
+                && matchesProjected(view.projectZ, roi.getZPosition(), view.image.getZ(), view.image.getNSlices())
+                && matchesProjected(view.projectC, roi.getCPosition(), view.image.getC(), view.image.getNChannels());
+    }
+
+    private void add3DWatershedPreviewOverlay(Overlay overlay, ImageViewContext view) {
         if (watershed3dPreview == null) return;
         for (Roi roi : watershed3dPreview.getThresholdMaskRois()) {
             // Original ROI boundary already shows the domain. Keep threshold mask
@@ -2629,9 +2709,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         }
         for (List<Roi> rois : watershed3dPreview.getSeedRoisByLabel().values()) {
             for (Roi roi : rois) {
-                if (roi == null || !matchesProjection(roi, boundImage)) continue;
+                if (roi == null || !matchesProjection(roi, view)) continue;
                 Roi copy = (Roi) roi.clone();
-                applyProjectionPosition(copy, boundImage);
+                applyProjectionPosition(copy, view);
                 copy.setFillColor(null);
                 copy.setStrokeColor(watershed3dSeedPreviewColor);
                 overlay.add(copy);
@@ -2652,9 +2732,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             Color color = colors[labelIndex % colors.length];
             labelIndex++;
             for (Roi roi : rois) {
-                if (roi == null || !matchesProjection(roi, boundImage)) continue;
+                if (roi == null || !matchesProjection(roi, view)) continue;
                 Roi copy = (Roi) roi.clone();
-                applyProjectionPosition(copy, boundImage);
+                applyProjectionPosition(copy, view);
                 copy.setFillColor(null);
                 copy.setStrokeColor(color);
                 overlay.add(copy);
@@ -2666,11 +2746,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         return false;
     }
 
-    private void applyProjectionPosition(Roi roi, ImagePlus imp) {
-        if (!hasStructuredAxes(imp)) return;
-        int projectedC = projectChannel ? 0 : roi.getCPosition();
-        int projectedZ = projectZ ? 0 : roi.getZPosition();
-        int projectedT = projectTime ? 0 : roi.getTPosition();
+    private void applyProjectionPosition(Roi roi, ImageViewContext view) {
+        if (view == null || !hasStructuredAxes(view.image)) return;
+        int projectedC = view.projectC ? 0 : roi.getCPosition();
+        int projectedZ = view.projectZ ? 0 : roi.getZPosition();
+        int projectedT = view.projectT ? 0 : roi.getTPosition();
         roi.setPosition(projectedC, projectedZ, projectedT);
     }
 
@@ -2698,31 +2778,158 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         return imp != null && (imp.getNChannels() > 1 || imp.getNSlices() > 1 || imp.getNFrames() > 1);
     }
 
-    private Roi createHighlightRoi(RoiNode node, Color color, float strokeWidth) {
-        if (node == null || boundImage == null || node.isHidden()) return null;
-        Roi roi = node.getRoi();
-        if (roi == null || !matchesProjection(roi, boundImage)) return null;
+    private Roi createHighlightRoi(ExplorerNode node, ImageViewContext view, Color color, float strokeWidth) {
+        if (node == null || view == null || nodeHidden(node)) return null;
+        Roi roi = representativeRoiForNode(node, view);
+        if (roi == null || !matchesProjection(roi, view)) return null;
         Roi copy = (Roi) roi.clone();
-        applyProjectionPosition(copy, boundImage);
+        applyProjectionPosition(copy, view);
         copy.setFillColor(null);
         copy.setStrokeColor(color);
         copy.setStrokeWidth(Math.max(strokeWidth, (float) copy.getStrokeWidth()));
         return copy;
     }
 
-    private Roi createEditReferenceRoi() {
+    private Roi createEditReferenceRoi(ImageViewContext view) {
         Roi reference = editCtrl.getOriginalRoiReference();
-        if (reference == null || boundImage == null) return null;
-        if (!matchesProjection(reference, boundImage)) return null;
-        applyProjectionPosition(reference, boundImage);
+        if (reference == null || view == null || !view.main) return null;
+        if (!matchesProjection(reference, view)) return null;
+        applyProjectionPosition(reference, view);
         reference.setFillColor(null);
         reference.setStrokeColor(EDIT_REFERENCE_COLOR);
         reference.setStrokeWidth(1f);
         return reference;
     }
 
+    private ImageViewContext mainView() {
+        if (boundImage == null) return null;
+        return new ImageViewContext(boundImage, true,
+                projectChannel || boundImage.getNChannels() <= 1,
+                projectZ || boundImage.getNSlices() <= 1,
+                projectTime || boundImage.getNFrames() <= 1);
+    }
+
+    private ImageViewContext subView() {
+        if (subImage == null || boundImage == null) return null;
+        return new ImageViewContext(subImage, false,
+                projectChannel || subImage.getNChannels() <= 1,
+                projectZ || subImage.getNSlices() <= 1,
+                projectTime || subImage.getNFrames() <= 1);
+    }
+
+    private List<OverlayEntry> buildOverlayEntries(ExplorerNode root) {
+        List<OverlayEntry> out = new ArrayList<OverlayEntry>();
+        if (root == null) return out;
+        if (chkContainerOr.isSelected()) {
+            collectContainerOrEntries(root, out);
+        } else {
+            for (RoiNode node : selResolver.resolveRoiNodes(Collections.<ExplorerNode>emptyList(), root)) {
+                if (node.isHidden() || isHiddenByWatershedPreview(node)) continue;
+                Roi roi = node.getRoi();
+                if (roi != null) out.add(new OverlayEntry(node, Collections.singletonList(roi)));
+            }
+        }
+        return out;
+    }
+
+    private List<Roi> displayRoisForEntry(OverlayEntry entry, ImageViewContext view) {
+        if (entry.target instanceof RoiNode) return entry.rois;
+        Roi merged = mergeRoisForView(entry.rois, view);
+        return merged != null ? Collections.singletonList(merged) : Collections.<Roi>emptyList();
+    }
+
+    private void collectContainerOrEntries(ExplorerNode node, List<OverlayEntry> out) {
+        if (node == null) return;
+        if (node instanceof RoiNode) {
+            RoiNode rn = (RoiNode) node;
+            if (!rn.isHidden() && !isHiddenByWatershedPreview(rn) && rn.getRoi() != null) {
+                out.add(new OverlayEntry(rn, Collections.singletonList(rn.getRoi())));
+            }
+            return;
+        }
+        boolean hasContainerChild = false;
+        boolean hasRoiChild = false;
+        for (ExplorerNode child : node.getChildren()) {
+            if (child instanceof FolderNode || child instanceof ZipNode) hasContainerChild = true;
+            if (child instanceof RoiNode) hasRoiChild = true;
+        }
+        if (!hasContainerChild && hasRoiChild && (node instanceof FolderNode || node instanceof ZipNode)) {
+            List<Roi> rois = new ArrayList<Roi>();
+            for (ExplorerNode child : node.getChildren()) {
+                if (!(child instanceof RoiNode)) continue;
+                RoiNode rn = (RoiNode) child;
+                if (rn.isHidden() || isHiddenByWatershedPreview(rn)) continue;
+                Roi roi = rn.getRoi();
+                if (roi != null) rois.add(roi);
+            }
+            if (!rois.isEmpty()) out.add(new OverlayEntry(node, rois));
+            return;
+        }
+        for (ExplorerNode child : node.getChildren()) {
+            if (child instanceof RoiNode) {
+                RoiNode rn = (RoiNode) child;
+                if (!rn.isHidden() && !isHiddenByWatershedPreview(rn) && rn.getRoi() != null) {
+                    out.add(new OverlayEntry(rn, Collections.singletonList(rn.getRoi())));
+                }
+            } else {
+                collectContainerOrEntries(child, out);
+            }
+        }
+    }
+
+    private Roi representativeRoiForNode(ExplorerNode node, ImageViewContext view) {
+        if (node instanceof RoiNode) return ((RoiNode) node).getRoi();
+        List<Roi> rois = new ArrayList<Roi>();
+        for (OverlayEntry entry : buildOverlayEntries(node)) {
+            rois.addAll(entry.rois);
+        }
+        return mergeRoisForView(rois, view);
+    }
+
+    private Roi mergeRoisForView(List<Roi> rois, ImageViewContext view) {
+        ShapeRoi merged = null;
+        if (rois == null) return null;
+        for (Roi roi : rois) {
+            if (roi == null || !matchesProjection(roi, view)) continue;
+            ShapeRoi sr = new ShapeRoi((Roi) roi.clone());
+            merged = merged == null ? sr : merged.or(sr);
+        }
+        return merged;
+    }
+
+    private boolean nodeHidden(ExplorerNode node) {
+        if (node instanceof RoiNode) return ((RoiNode) node).isHidden();
+        return false;
+    }
+
     private static int[] currentImagePosition(ImagePlus imp) {
         return new int[]{imp.getC(), imp.getZ(), imp.getT()};
+    }
+
+    private static final class ImageViewContext {
+        final ImagePlus image;
+        final boolean main;
+        final boolean projectC;
+        final boolean projectZ;
+        final boolean projectT;
+
+        ImageViewContext(ImagePlus image, boolean main, boolean projectC, boolean projectZ, boolean projectT) {
+            this.image = image;
+            this.main = main;
+            this.projectC = projectC;
+            this.projectZ = projectZ;
+            this.projectT = projectT;
+        }
+    }
+
+    private static final class OverlayEntry {
+        final ExplorerNode target;
+        final List<Roi> rois;
+
+        OverlayEntry(ExplorerNode target, List<Roi> rois) {
+            this.target = target;
+            this.rois = rois;
+        }
     }
 
     private static boolean sameImagePosition(ImagePlus imp, int[] previous) {
@@ -2767,12 +2974,30 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private void bindImage(ImagePlus imp) {
         uninstallPickMode();
         uninstallImageShortcuts();
+        if (boundImage != imp && boundImage != null) boundImage.setOverlay((Overlay) null);
         boundImage = imp;
         boundImageLabel.setText("Image: " + imp.getTitle());
         boundImageLabel.setToolTipText(imp.getTitle());
+        if (subImage != null && (subImage.getWidth() != imp.getWidth() || subImage.getHeight() != imp.getHeight())) {
+            clearSubBindImage();
+        }
         installImageShortcuts(imp);
         updateStatus();
         refreshOverlay();
+    }
+
+    private void clearSubOverlay() {
+        if (subImage != null) {
+            subImage.setOverlay((Overlay) null);
+            subImage.updateAndDraw();
+        }
+    }
+
+    private static boolean sameXyCalibration(ImagePlus a, ImagePlus b) {
+        if (a == null || b == null || a.getCalibration() == null || b.getCalibration() == null) return true;
+        double eps = 1e-9;
+        return Math.abs(a.getCalibration().pixelWidth - b.getCalibration().pixelWidth) < eps
+                && Math.abs(a.getCalibration().pixelHeight - b.getCalibration().pixelHeight) < eps;
     }
 
     private void installImageShortcuts(ImagePlus imp) {
@@ -2829,10 +3054,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     private void installPickMode() {
-        if (boundImage == null || boundImage.getCanvas() == null) return;
+        if ((boundImage == null || boundImage.getCanvas() == null)
+                && (subImage == null || subImage.getCanvas() == null)) return;
         pickMode = true;
         updatePickButtonState();
-        pickCanvas = boundImage.getCanvas();
         pickListener = new MouseAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
@@ -2854,24 +3079,35 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 handlePickWheel(e);
             }
         };
-        pickCanvas.addMouseMotionListener(pickListener);
-        pickCanvas.addMouseListener(pickListener);
-        pickCanvas.addMouseWheelListener(pickListener);
+        addPickCanvas(boundImage);
+        addPickCanvas(subImage);
         IJ.showStatus("ROI Explorer: Pick ROI on Image enabled");
     }
 
     private void uninstallPickMode() {
         pickMode = false;
         updatePickButtonState();
-        if (pickCanvas != null && pickListener != null) {
-            pickCanvas.removeMouseMotionListener(pickListener);
-            pickCanvas.removeMouseListener(pickListener);
-            pickCanvas.removeMouseWheelListener(pickListener);
-            pickCanvas = null;
+        if (pickListener != null) {
+            for (ImageCanvas canvas : new ArrayList<ImageCanvas>(pickCanvases)) {
+                canvas.removeMouseMotionListener(pickListener);
+                canvas.removeMouseListener(pickListener);
+                canvas.removeMouseWheelListener(pickListener);
+            }
+            pickCanvases.clear();
         }
         pickListener = null;
         clearPickHover();
         IJ.showStatus("");
+    }
+
+    private void addPickCanvas(ImagePlus image) {
+        if (image == null || image.getCanvas() == null || pickListener == null) return;
+        ImageCanvas canvas = image.getCanvas();
+        if (pickCanvases.contains(canvas)) return;
+        pickCanvases.add(canvas);
+        canvas.addMouseMotionListener(pickListener);
+        canvas.addMouseListener(pickListener);
+        canvas.addMouseWheelListener(pickListener);
     }
 
     private void updatePickButtonState() {
@@ -2891,10 +3127,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     private void handlePickMove(MouseEvent e) {
-        if (!pickMode || boundImage == null || boundImage.getCanvas() == null) return;
-        ImageCanvas canvas = boundImage.getCanvas();
+        ImageViewContext view = viewForEvent(e);
+        if (!pickMode || view == null || view.image.getCanvas() == null) return;
+        ImageCanvas canvas = view.image.getCanvas();
         Point point = new Point(canvas.offScreenX(e.getX()), canvas.offScreenY(e.getY()));
-        updatePickCandidates(point);
+        updatePickCandidates(point, view);
     }
 
     private void handlePickWheel(MouseWheelEvent e) {
@@ -2917,12 +3154,12 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         e.consume();
     }
 
-    private void updatePickCandidates(Point point) {
+    private void updatePickCandidates(Point point, ImageViewContext view) {
         if (point == null) {
             clearPickHover();
             return;
         }
-        java.util.List<RoiNode> candidates = findPickCandidates(point);
+        java.util.List<ExplorerNode> candidates = findPickCandidates(point, view);
         if (candidates.isEmpty()) {
             clearPickHover();
             return;
@@ -2947,25 +3184,31 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         }
     }
 
-    private java.util.List<RoiNode> findPickCandidates(Point point) {
+    private java.util.List<ExplorerNode> findPickCandidates(Point point, ImageViewContext view) {
         ExplorerNode root = tableModel.getViewRoot();
-        if (boundImage == null || root == null) return Collections.emptyList();
-        java.util.List<RoiNode> candidates = new ArrayList<RoiNode>();
-        for (RoiNode node : selResolver.resolveRoiNodes(Collections.<ExplorerNode>emptyList(), root)) {
-            if (node.isHidden()) continue;
-            Roi roi = node.getRoi();
-            if (roi == null || !matchesProjection(roi, boundImage)) continue;
-            if (roiContains(roi, point.x, point.y)) candidates.add(node);
+        if (view == null || root == null) return Collections.emptyList();
+        java.util.List<ExplorerNode> candidates = new ArrayList<ExplorerNode>();
+        for (OverlayEntry entry : buildOverlayEntries(root)) {
+            Roi roi = representativeRoiForNode(entry.target, view);
+            if (roi == null || !matchesProjection(roi, view)) continue;
+            if (roiContains(roi, point.x, point.y)) candidates.add(entry.target);
         }
-        Collections.sort(candidates, new Comparator<RoiNode>() {
+        Collections.sort(candidates, new Comparator<ExplorerNode>() {
             @Override
-            public int compare(RoiNode a, RoiNode b) {
-                double areaA = areaOf(a.getRoi());
-                double areaB = areaOf(b.getRoi());
+            public int compare(ExplorerNode a, ExplorerNode b) {
+                double areaA = areaOf(representativeRoiForNode(a, view));
+                double areaB = areaOf(representativeRoiForNode(b, view));
                 return Double.compare(areaA, areaB);
             }
         });
         return candidates;
+    }
+
+    private ImageViewContext viewForEvent(MouseEvent e) {
+        Object src = e.getSource();
+        if (boundImage != null && src == boundImage.getCanvas()) return mainView();
+        if (subImage != null && src == subImage.getCanvas()) return subView();
+        return null;
     }
 
     private boolean roiContains(Roi roi, int x, int y) {

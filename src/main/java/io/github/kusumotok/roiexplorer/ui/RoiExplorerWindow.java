@@ -53,6 +53,9 @@ public class RoiExplorerWindow extends JFrame {
     public boolean hasActivePreview()                             { return panel.hasActivePreview(); }
     public void cleanupPreview()                                  { panel.cleanupPreview(); }
     public void setBindImage(ImagePlus imp)                       { panel.setBindImage(imp); }
+    public void setSubBindImage(ImagePlus imp)                    { panel.setSubBindImage(imp); }
+    public void clearSubBindImage()                               { panel.clearSubBindImage(); }
+    public void setContainerOrMode(boolean enabled)               { panel.setContainerOrMode(enabled); }
     public ImagePlus getBoundImage()                              { return panel.getBoundImage(); }
     public void measureCurrentRoot()                              { panel.measureCurrentRoot(); }
     public MeasurementResult measureCurrentRoot(MeasurementRequest r) { return panel.measureCurrentRoot(r); }

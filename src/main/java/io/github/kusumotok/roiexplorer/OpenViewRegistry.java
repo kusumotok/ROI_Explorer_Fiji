@@ -397,7 +397,7 @@ public class OpenViewRegistry {
 
     public void refreshOverlaysFor(ij.ImagePlus image) {
         for (RoiExplorerPanel w : new ArrayList<>(windows)) {
-            if (w.getBoundImage() == image) {
+            if (w.ownsImage(image)) {
                 w.refreshOverlay();
             }
         }

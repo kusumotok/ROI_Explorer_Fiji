@@ -94,6 +94,22 @@ public class RoiExplorerFacade {
         runOnEdt(() -> w.setBindImage(bindImage));
     }
 
+    public synchronized void setSubBindImage(ImagePlus subImage) {
+        RoiExplorerWindow w = showWindow();
+        runOnEdt(() -> w.setSubBindImage(subImage));
+    }
+
+    public synchronized void clearSubBindImage() {
+        RoiExplorerWindow w = getWindow();
+        if (w == null) return;
+        runOnEdt(w::clearSubBindImage);
+    }
+
+    public synchronized void setContainerOrMode(boolean enabled) {
+        RoiExplorerWindow w = showWindow();
+        runOnEdt(() -> w.setContainerOrMode(enabled));
+    }
+
     public synchronized void reload() {
         RoiExplorerWindow w = getWindow();
         if (w == null) return;
