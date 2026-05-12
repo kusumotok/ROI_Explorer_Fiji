@@ -216,6 +216,20 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         return viewRootPath != null && tableModel.getViewRoot() != null;
     }
 
+    public void closeFolder() {
+        uninstallPickMode();
+        cleanupPreview();
+        table.clearSelection();
+        tableModel.setRoot(null);
+        nameRenderer.setViewRoot(null);
+        viewRootPath = null;
+        rootPathLabel.setText("No folder open");
+        rootPathLabel.setToolTipText(null);
+        updateTitle("ROI Explorer");
+        updateStatus();
+        refreshOverlay();
+    }
+
     public boolean hasActivePreview() {
         return pickMode || editCtrl.isEditing() || isSplitModeActive() || watershed3dPreview != null;
     }
@@ -1144,7 +1158,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
               watershed3dThresholdSpinner = new JSpinner(new SpinnerNumberModel(500, 0, Integer.MAX_VALUE, 1));
               watershed3dConnectivityBox = new JComboBox<Integer>(new Integer[]{6, 18, 26});
               watershed3dConnectivityBox.setSelectedItem(6);
-              watershed3dMinSeedSizeSpinner = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 1_000_000.0, 0.1));
+              watershed3dMinSeedSizeSpinner = new JSpinner(new SpinnerNumberModel(0.1, 0.0, 1_000_000.0, 0.1));
               watershed3dChannelSpinner = new JSpinner(new SpinnerNumberModel(selection.defaultCPosition, 1, Math.max(1, boundImage.getNChannels()), 1));
               watershed3dTimeSpinner = new JSpinner(new SpinnerNumberModel(selection.defaultTPosition, 1, Math.max(1, boundImage.getNFrames()), 1));
               watershed3dChannelSpinner.setEnabled(boundImage.getNChannels() > 1);
@@ -1270,9 +1284,22 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     private void save3DWatershedPreview() {
-        if (watershed3dSelection == null || watershed3dPreview == null) {
-            JOptionPane.showMessageDialog(this, "Run Apply before saving 3D Watershed results.",
+        if (watershed3dSelection == null) {
+            JOptionPane.showMessageDialog(this, "No 3D Watershed selection is active.",
                     "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        try {
+            watershed3dSeedOnlyPreview = false;
+            watershed3dPreview = watershed3dSvc.runThresholdSeeds(build3DWatershedRequest());
+            update3DWatershedThresholdPreviewImage();
+            refreshOverlay();
+        } catch (IllegalStateException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(),
+                    "3D Watershed", JOptionPane.WARNING_MESSAGE);
+            return;
+        } catch (Exception e) {
+            showError("3D Watershed save preparation failed", e);
             return;
         }
         if (!watershed3dPreview.canRunWatershed()) {
@@ -2714,12 +2741,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     private void bindActiveImageIfPresent() {
-        try {
-            ImagePlus imp = IJ.getImage();
-            if (imp != null) bindImage(imp);
-        } catch (RuntimeException ignored) {
-            // No active image at startup is fine.
-        }
+        // WindowManager.getCurrentImage() returns null silently when no image is open.
+        // IJ.getImage() would show a "No images are open" dialog, which is undesirable
+        // when the panel is embedded in another plugin's UI.
+        ImagePlus imp = ij.WindowManager.getCurrentImage();
+        if (imp != null) bindImage(imp);
     }
 
     private void bindImage(ImagePlus imp) {

@@ -14,6 +14,10 @@ public class TreeColumnRenderer extends JComponent implements TableCellRenderer 
     public static final int INDENT = 18;
     public static final int TRIANGLE_W = 16;
     private static final int ICON_SIZE = 13;
+    private static final int VIS_SHOWN = 0;
+    private static final int VIS_HIDDEN = 1;
+    private static final int VIS_MIXED = 2;
+    private static final int VIS_NONE = 3;
 
     private ExplorerNode currentNode;
     private ExplorerNode viewRoot;
@@ -120,7 +124,7 @@ public class TreeColumnRenderer extends JComponent implements TableCellRenderer 
             int fill = fc != null ? fc.getRGB() : 0;
             return "roi_" + stroke + "_" + fill + "_" + hidden;
         }
-        return node.getType().name();
+        return node.getType().name() + "_" + aggregateVisibilityState(node);
     }
 
     private static Image buildIcon(ExplorerNode node) {
@@ -131,9 +135,9 @@ public class TreeColumnRenderer extends JComponent implements TableCellRenderer 
         if (node instanceof RoiNode) {
             drawRoiIcon(g, (RoiNode) node);
         } else if (node instanceof ZipNode) {
-            drawZipIcon(g);
+            drawZipIcon(g, aggregateVisibilityState(node));
         } else {
-            drawFolderIcon(g);
+            drawFolderIcon(g, aggregateVisibilityState(node));
         }
         g.dispose();
         return img;
@@ -160,16 +164,17 @@ public class TreeColumnRenderer extends JComponent implements TableCellRenderer 
         }
     }
 
-    private static void drawFolderIcon(Graphics2D g) {
+    private static void drawFolderIcon(Graphics2D g, int visibilityState) {
         g.setColor(new Color(255, 210, 80));
         int[] px = {1, 4, 4, ICON_SIZE - 1, ICON_SIZE - 1, 1};
         int[] py = {5, 5, 3, 3, ICON_SIZE - 1, ICON_SIZE - 1};
         g.fillPolygon(px, py, 6);
         g.setColor(new Color(200, 160, 40));
         g.drawPolygon(px, py, 6);
+        drawVisibilityBadge(g, visibilityState);
     }
 
-    private static void drawZipIcon(Graphics2D g) {
+    private static void drawZipIcon(Graphics2D g, int visibilityState) {
         g.setColor(new Color(255, 210, 80));
         int[] px = {1, 4, 4, ICON_SIZE - 1, ICON_SIZE - 1, 1};
         int[] py = {5, 5, 3, 3, ICON_SIZE - 1, ICON_SIZE - 1};
@@ -183,5 +188,64 @@ public class TreeColumnRenderer extends JComponent implements TableCellRenderer 
         for (int y = 4; y < ICON_SIZE - 1; y += 2) {
             g.drawLine(cx - 1, y, cx + 1, y + 1);
         }
+        drawVisibilityBadge(g, visibilityState);
+    }
+
+    private static void drawVisibilityBadge(Graphics2D g, int visibilityState) {
+        if (visibilityState == VIS_NONE) return;
+        int size = 5;
+        int x = ICON_SIZE - size - 1;
+        int y = ICON_SIZE - size - 1;
+        Shape oldClip = g.getClip();
+        g.setColor(Color.WHITE);
+        g.fillOval(x - 1, y - 1, size + 2, size + 2);
+        if (visibilityState == VIS_SHOWN) {
+            g.setColor(new Color(60, 160, 255));
+            g.fillOval(x, y, size, size);
+        } else if (visibilityState == VIS_HIDDEN) {
+            g.setColor(new Color(140, 140, 140));
+            g.fillOval(x, y, size, size);
+        } else {
+            g.setClip(x, y, size / 2 + 1, size);
+            g.setColor(new Color(60, 160, 255));
+            g.fillOval(x, y, size, size);
+            g.setClip(x + size / 2, y, size, size);
+            g.setColor(new Color(140, 140, 140));
+            g.fillOval(x, y, size, size);
+            g.setClip(oldClip);
+        }
+        g.setClip(oldClip);
+        g.setColor(new Color(60, 60, 60, 180));
+        g.drawOval(x, y, size, size);
+    }
+
+    private static int aggregateVisibilityState(ExplorerNode node) {
+        VisibilitySummary summary = collectVisibility(node);
+        if (!summary.hasVisible && !summary.hasHidden) return VIS_NONE;
+        if (summary.hasVisible && summary.hasHidden) return VIS_MIXED;
+        return summary.hasHidden ? VIS_HIDDEN : VIS_SHOWN;
+    }
+
+    private static VisibilitySummary collectVisibility(ExplorerNode node) {
+        VisibilitySummary summary = new VisibilitySummary();
+        collectVisibility(node, summary);
+        return summary;
+    }
+
+    private static void collectVisibility(ExplorerNode node, VisibilitySummary summary) {
+        if (node instanceof RoiNode) {
+            if (((RoiNode) node).isHidden()) summary.hasHidden = true;
+            else summary.hasVisible = true;
+            return;
+        }
+        for (ExplorerNode child : node.getChildren()) {
+            collectVisibility(child, summary);
+            if (summary.hasVisible && summary.hasHidden) return;
+        }
+    }
+
+    private static final class VisibilitySummary {
+        boolean hasVisible;
+        boolean hasHidden;
     }
 }
