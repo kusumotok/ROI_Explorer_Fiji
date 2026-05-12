@@ -31,6 +31,7 @@ import java.awt.datatransfer.*;
 import java.awt.event.*;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.text.ParseException;
 import java.util.*;
 import java.util.List;
 import java.util.Set;
@@ -1033,7 +1034,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         RoiNode node = (RoiNode) sel.get(0);
         Roi roi = node.getRoi();
         if (roi == null) return;
-        ImagePlus imp = boundImage != null ? boundImage : IJ.getImage();
+        ImagePlus imp = boundImage;
         if (imp == null) return;
         if (hasStructuredAxes(imp)) {
             int c = roi.getCPosition(), z = roi.getZPosition(), t = roi.getTPosition();
@@ -1234,6 +1235,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private void apply3DWatershedPreview() {
         if (watershed3dSelection == null) return;
         try {
+            commit3DWatershedEditors();
             watershed3dSeedOnlyPreview = false;
             watershed3dPreview = watershed3dSvc.runThresholdSeeds(
                     build3DWatershedRequest());
@@ -1257,6 +1259,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private void preview3DWatershedSeeds() {
         if (watershed3dSelection == null) return;
         try {
+            commit3DWatershedEditors();
             watershed3dSeedOnlyPreview = true;
             watershed3dPreview = watershed3dSvc.previewThresholdSeeds(build3DWatershedRequest());
             update3DWatershedThresholdPreviewImage();
@@ -1283,6 +1286,13 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                   ((Number) watershed3dTimeSpinner.getValue()).intValue());
     }
 
+    private void commit3DWatershedEditors() throws ParseException {
+        if (watershed3dThresholdSpinner != null) watershed3dThresholdSpinner.commitEdit();
+        if (watershed3dMinSeedSizeSpinner != null) watershed3dMinSeedSizeSpinner.commitEdit();
+        if (watershed3dChannelSpinner != null) watershed3dChannelSpinner.commitEdit();
+        if (watershed3dTimeSpinner != null) watershed3dTimeSpinner.commitEdit();
+    }
+
     private void save3DWatershedPreview() {
         if (watershed3dSelection == null) {
             JOptionPane.showMessageDialog(this, "No 3D Watershed selection is active.",
@@ -1290,6 +1300,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             return;
         }
         try {
+            commit3DWatershedEditors();
             watershed3dSeedOnlyPreview = false;
             watershed3dPreview = watershed3dSvc.runThresholdSeeds(build3DWatershedRequest());
             update3DWatershedThresholdPreviewImage();
@@ -1786,6 +1797,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 .setEnabled(canActiveUndo());
         addMenuItem(menu, historyMenuLabel("Redo", activeRedoLabel()), e -> cmdRedo())
                 .setEnabled(canActiveRedo());
+        menu.addSeparator();
+        addMenuItem(menu, "Delete", e -> cmdDelete()).setEnabled(!sel.isEmpty() && !splitting);
+        addMenuItem(menu, "Rename...", e -> cmdRename()).setEnabled(sel.size() == 1 && !splitting);
+        addMenuItem(menu, "Toggle Visibility", e -> cmdToggleHiddenOnSelection()).setEnabled(!sel.isEmpty());
+        addMenuItem(menu, "Deselect All", e -> table.clearSelection()).setEnabled(!sel.isEmpty());
         menu.addSeparator();
         addMenuItem(menu, "Reveal on Image", e -> cmdRevealOnImage()).setEnabled(singleRoi);
         addMenuItem(menu, pickMode ? "Stop Picking on Image" : "Pick ROI on Image", e -> cmdPickRoiOnImage())
@@ -2898,8 +2914,6 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         boolean additive = e.isShiftDown() || e.isControlDown() || e.isMetaDown();
         selectNodeInTree(hoveredPickNode, additive);
         if (e.getClickCount() >= 2) cmdEdit();
-        else cmdRevealOnImage();
-        uninstallPickMode();
         e.consume();
     }
 

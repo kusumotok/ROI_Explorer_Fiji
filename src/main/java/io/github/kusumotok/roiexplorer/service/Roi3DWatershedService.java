@@ -149,6 +149,7 @@ public class Roi3DWatershedService {
 
         ImageStack inverted = invertIntensity(volume.imageStack);
         ImageStack labelStack = computeWatershed(inverted, seedBuild.seedLabels, volume.domainMask, request.connectivity);
+        maskLabelsToDomain(labelStack, volume.domainMask);
         ImagePlus labelImage = new ImagePlus(request.image.getShortTitle() + "-roi-explorer-3d-watershed", labelStack);
         Map<Integer, List<Roi>> roisByLabel = exportRoisByLabel(labelImage, volume.cPosition, volume.tPosition, request.image);
         if (roisByLabel.size() < 2) {
@@ -399,6 +400,21 @@ public class Roi3DWatershedService {
             return (ImageStack) method.invoke(null, inverted, seedLabels, domainMask, connectivity, false);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Failed to invoke MorphoLibJ watershed backend.", e);
+        }
+    }
+
+    private void maskLabelsToDomain(ImageStack labelStack, ImageStack domainMask) {
+        int width = labelStack.getWidth();
+        int height = labelStack.getHeight();
+        int depth = labelStack.getSize();
+        for (int z = 1; z <= depth; z++) {
+            ImageProcessor labelIp = labelStack.getProcessor(z);
+            ImageProcessor domainIp = domainMask.getProcessor(z);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    if (domainIp.get(x, y) == 0) labelIp.putPixelValue(x, y, 0);
+                }
+            }
         }
     }
 
