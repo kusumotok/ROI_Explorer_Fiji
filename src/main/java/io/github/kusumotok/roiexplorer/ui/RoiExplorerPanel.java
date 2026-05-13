@@ -99,6 +99,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private final JLabel statusLabel = new JLabel("0 ROI");
     private ImagePlus boundImage;
     private ImagePlus subImage;
+    private boolean overlayEnabled = true;
     private Path viewRootPath;
     private final SplitWorkflowSession splitWorkflow = new SplitWorkflowSession();
     private JDialog watershed3dDialog;
@@ -315,8 +316,13 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         refreshOverlay();
     }
 
+    public void setOverlayEnabled(boolean enabled) {
+        overlayEnabled = enabled;
+        if (enabled) refreshOverlay();
+    }
+
     public boolean ownsImage(ImagePlus image) {
-        return image != null && (image == boundImage || image == subImage);
+        return overlayEnabled && image != null && (image == boundImage || image == subImage);
     }
 
     public void measureCurrentRoot() {
@@ -2654,6 +2660,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     public void refreshOverlay() {
+        if (!overlayEnabled) return;
         if (boundImage == null && subImage == null) return;
         if (overlayRefreshing) return;
         overlayRefreshing = true;
