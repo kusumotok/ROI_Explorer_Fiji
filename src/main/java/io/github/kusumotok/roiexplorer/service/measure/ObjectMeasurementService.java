@@ -28,8 +28,9 @@ public final class ObjectMeasurementService {
         List<ObjectMeasurementResult> all = new ArrayList<>();
         int spotId = 1;
         for (MeasurementUnit unit : units) {
+            int unitSpotId = spotId++;
             for (ObjectMeasurementResult r : profile.measure(unit, image)) {
-                all.add(withSpotId(r, spotId++));
+                all.add(withSpotId(r, unitSpotId));
             }
         }
         return all;
@@ -63,8 +64,14 @@ public final class ObjectMeasurementService {
             .spotId(spotId)
             .unitName(r.unitName)
             .c(r.c).t(r.t)
+            .tFrom(r.tFrom).tTo(r.tTo)
             .volumeVox(r.volumeVox)
             .volumeUm3(r.volumeUm3)
+            .volumeFromVox(r.volumeFromVox)
+            .volumeToVox(r.volumeToVox)
+            .volumeFromUm3(r.volumeFromUm3)
+            .volumeToUm3(r.volumeToUm3)
+            .deltaVolumeUm3(r.deltaVolumeUm3)
             .surfaceAreaUm2(r.surfaceAreaUm2)
             .sphericity(r.sphericity)
             .integratedIntensity(r.integratedIntensity)
@@ -73,6 +80,11 @@ public final class ObjectMeasurementService {
             .centroidXUm(r.centroidXUm)
             .centroidYUm(r.centroidYUm)
             .centroidZUm(r.centroidZUm)
+            .centroidFrom(r.centroidFromXUm, r.centroidFromYUm, r.centroidFromZUm)
+            .centroidTo(r.centroidToXUm, r.centroidToYUm, r.centroidToZUm)
+            .displacementUm(r.displacementUm)
+            .interval(r.interval)
+            .velocityUmPerFrame(r.velocityUmPerFrame)
             .maxFeret3dUm(r.maxFeret3dUm)
             .maxFeretP1(r.maxFeretP1XUm, r.maxFeretP1YUm, r.maxFeretP1ZUm)
             .maxFeretP2(r.maxFeretP2XUm, r.maxFeretP2YUm, r.maxFeretP2ZUm)

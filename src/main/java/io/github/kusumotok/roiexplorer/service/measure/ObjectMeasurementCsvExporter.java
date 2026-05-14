@@ -20,7 +20,7 @@ public final class ObjectMeasurementCsvExporter {
     public void write(List<ObjectMeasurementResult> results, Path outputPath,
                       Set<MeasurementColumn> enabled) throws IOException {
         String unit = results.isEmpty() ? "µm" : results.get(0).calibrationUnit;
-        List<ColumnSpec> specs = buildSpecs(unit, enabled);
+        List<ColumnSpec> specs = buildSpecs(unit, enabled, hasTimeComparisonRows(results));
 
         try (PrintWriter pw = new PrintWriter(new BufferedWriter(
                 new OutputStreamWriter(
@@ -48,7 +48,8 @@ public final class ObjectMeasurementCsvExporter {
 
     // ── Column spec building ───────────────────────────────────────────
 
-    private static List<ColumnSpec> buildSpecs(String rawUnit, Set<MeasurementColumn> enabled) {
+    private static List<ColumnSpec> buildSpecs(String rawUnit, Set<MeasurementColumn> enabled,
+                                               boolean includeTimeComparison) {
         String u  = normalizeUnit(rawUnit);
         String u2 = u + "2";
         String u3 = u + "3";
@@ -60,12 +61,25 @@ public final class ObjectMeasurementCsvExporter {
         s.add(fixed("unit_name", r -> csvCell(r.unitName)));
         s.add(fixed("c",         r -> String.valueOf(r.c)));
         s.add(fixed("t",         r -> String.valueOf(r.t)));
+        if (includeTimeComparison) {
+            s.add(fixed("t_from", r -> String.valueOf(r.tFrom)));
+            s.add(fixed("t_to",   r -> String.valueOf(r.tTo)));
+        }
 
         // Toggleable measurement columns
         if (enabled.contains(MeasurementColumn.VOLUME_CAL3))
             s.add(fixed("volume_" + u3, r -> fmt6(r.volumeUm3)));
         if (enabled.contains(MeasurementColumn.VOLUME_VOX))
             s.add(fixed("volume_vox",   r -> String.valueOf(r.volumeVox)));
+        if (includeTimeComparison && enabled.contains(MeasurementColumn.VOLUME_CAL3)) {
+            s.add(fixed("volume_from_" + u3, r -> fmt6(r.volumeFromUm3)));
+            s.add(fixed("volume_to_" + u3, r -> fmt6(r.volumeToUm3)));
+            s.add(fixed("delta_volume_" + u3, r -> fmt6(r.deltaVolumeUm3)));
+        }
+        if (includeTimeComparison && enabled.contains(MeasurementColumn.VOLUME_VOX)) {
+            s.add(fixed("volume_from_vox", r -> String.valueOf(r.volumeFromVox)));
+            s.add(fixed("volume_to_vox", r -> String.valueOf(r.volumeToVox)));
+        }
         if (enabled.contains(MeasurementColumn.SURFACE_AREA))
             s.add(fixed("surface_area_" + u2, r -> fmt6(r.surfaceAreaUm2)));
         if (enabled.contains(MeasurementColumn.SPHERICITY))
@@ -80,6 +94,17 @@ public final class ObjectMeasurementCsvExporter {
             s.add(fixed("centroid_x_" + u, r -> fmt4(r.centroidXUm)));
             s.add(fixed("centroid_y_" + u, r -> fmt4(r.centroidYUm)));
             s.add(fixed("centroid_z_" + u, r -> fmt4(r.centroidZUm)));
+            if (includeTimeComparison) {
+                s.add(fixed("centroid_from_x_" + u, r -> fmt4(r.centroidFromXUm)));
+                s.add(fixed("centroid_from_y_" + u, r -> fmt4(r.centroidFromYUm)));
+                s.add(fixed("centroid_from_z_" + u, r -> fmt4(r.centroidFromZUm)));
+                s.add(fixed("centroid_to_x_" + u, r -> fmt4(r.centroidToXUm)));
+                s.add(fixed("centroid_to_y_" + u, r -> fmt4(r.centroidToYUm)));
+                s.add(fixed("centroid_to_z_" + u, r -> fmt4(r.centroidToZUm)));
+                s.add(fixed("displacement_" + u, r -> fmt4(r.displacementUm)));
+                s.add(fixed("interval", r -> fmt4(r.interval)));
+                s.add(fixed("velocity_" + u + "_per_frame", r -> fmt4(r.velocityUmPerFrame)));
+            }
         }
         if (enabled.contains(MeasurementColumn.MAX_FERET3D))
             s.add(fixed("max_feret3d_" + u, r -> fmt4(r.maxFeret3dUm)));
@@ -92,6 +117,13 @@ public final class ObjectMeasurementCsvExporter {
             s.add(fixed("max_feret_p2_z_" + u, r -> fmt4(r.maxFeretP2ZUm)));
         }
         return s;
+    }
+
+    private static boolean hasTimeComparisonRows(List<ObjectMeasurementResult> results) {
+        for (ObjectMeasurementResult r : results) {
+            if (r.tFrom > 0 && r.tTo > 0) return true;
+        }
+        return false;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
