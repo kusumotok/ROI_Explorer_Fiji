@@ -626,19 +626,12 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
                 if (col == ExplorerTreeTableModel.COL_NAME) {
                     ExplorerNode node = tableModel.getNodeAt(row);
-                    if (node != null && !node.isLeaf()) {
-                        Rectangle cell = t.getCellRect(row, 0, false);
-                        int depth = tableModel.getViewRoot() != null
-                                ? node.getDepthRelativeTo(tableModel.getViewRoot()) : 0;
-                        int tx = cell.x + depth * TreeColumnRenderer.INDENT + 2;
-                        int ex = tx + TreeColumnRenderer.TRIANGLE_W;
-                        if (e.getX() >= tx && e.getX() <= ex) {
-                            List<Path> sel = tableModel.snapshotSelection(t.getSelectedRows());
-                            tableModel.toggleExpansion(row);
-                            restoreSelection(sel);
-                            e.consume();
-                            return;
-                        }
+                    if (isExpansionHandleHit(t, e, row, col, node)) {
+                        List<Path> sel = tableModel.snapshotSelection(t.getSelectedRows());
+                        tableModel.toggleExpansion(row);
+                        restoreSelection(sel);
+                        e.consume();
+                        return;
                     }
                 }
 
@@ -655,7 +648,12 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 if (e.getClickCount() < 2) return;
                 int row = t.rowAtPoint(e.getPoint());
                 if (row < 0) return;
+                int col = t.columnAtPoint(e.getPoint());
                 ExplorerNode node = tableModel.getNodeAt(row);
+                if (isExpansionHandleHit(t, e, row, col, node)) {
+                    e.consume();
+                    return;
+                }
                 if (node instanceof RoiNode) {
                     cmdEdit();
                 } else if (node instanceof FolderNode || node instanceof ZipNode) {
@@ -703,6 +701,16 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
         t.setPreferredScrollableViewportSize(new Dimension(280, 200));
         return t;
+    }
+
+    private boolean isExpansionHandleHit(JTable t, MouseEvent e, int row, int col, ExplorerNode node) {
+        if (col != ExplorerTreeTableModel.COL_NAME || node == null || node.isLeaf()) return false;
+        Rectangle cell = t.getCellRect(row, 0, false);
+        int depth = tableModel.getViewRoot() != null
+                ? node.getDepthRelativeTo(tableModel.getViewRoot()) : 0;
+        int tx = cell.x + depth * TreeColumnRenderer.INDENT + 2;
+        int ex = tx + TreeColumnRenderer.TRIANGLE_W;
+        return e.getX() >= tx && e.getX() <= ex;
     }
 
     private JPanel buildHeaderPanel() {
