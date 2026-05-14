@@ -240,11 +240,11 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
             case COL_NAME:
                 return node;
             case COL_Z:
-                return node instanceof RoiNode ? posStr(((RoiNode) node).getZ()) : null;
+                return node instanceof RoiNode ? posStr(((RoiNode) node).getZ()) : aggregatePos(node, COL_Z);
             case COL_C:
-                return node instanceof RoiNode ? posStr(((RoiNode) node).getC()) : null;
+                return node instanceof RoiNode ? posStr(((RoiNode) node).getC()) : aggregatePos(node, COL_C);
             case COL_T:
-                return node instanceof RoiNode ? posStr(((RoiNode) node).getT()) : null;
+                return node instanceof RoiNode ? posStr(((RoiNode) node).getT()) : aggregatePos(node, COL_T);
             case COL_DATE:
                 long ts = node.getPath().toFile().lastModified();
                 return ts > 0 ? dateFmt.format(new java.util.Date(ts)) : null;
@@ -257,5 +257,37 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
 
     private static String posStr(int pos) {
         return pos == 0 ? "" : String.valueOf(pos);
+    }
+
+    private static String aggregatePos(ExplorerNode node, int col) {
+        PosRange range = new PosRange();
+        collectPos(node, col, range);
+        if (!range.hasValue) return "";
+        return range.min == range.max ? String.valueOf(range.min) : range.min + "-" + range.max;
+    }
+
+    private static void collectPos(ExplorerNode node, int col, PosRange range) {
+        if (node instanceof RoiNode) {
+            int pos;
+            RoiNode roi = (RoiNode) node;
+            if (col == COL_Z) pos = roi.getZ();
+            else if (col == COL_C) pos = roi.getC();
+            else pos = roi.getT();
+            if (pos > 0) range.add(pos);
+            return;
+        }
+        for (ExplorerNode child : node.getChildren()) collectPos(child, col, range);
+    }
+
+    private static final class PosRange {
+        boolean hasValue;
+        int min = Integer.MAX_VALUE;
+        int max = Integer.MIN_VALUE;
+
+        void add(int value) {
+            hasValue = true;
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
     }
 }
