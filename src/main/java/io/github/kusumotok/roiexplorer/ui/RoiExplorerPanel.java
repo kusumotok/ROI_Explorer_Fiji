@@ -393,14 +393,32 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
     private void showObjectMeasurementTable(List<ObjectMeasurementResult> results) {
         ij.measure.ResultsTable rt = new ij.measure.ResultsTable();
+        boolean hasTimeComparison = false;
+        for (ObjectMeasurementResult r : results) {
+            if (r.tFrom > 0 && r.tTo > 0) {
+                hasTimeComparison = true;
+                break;
+            }
+        }
         for (ObjectMeasurementResult r : results) {
             rt.incrementCounter();
             rt.addValue("spot_id", r.spotId);
             rt.addLabel(r.unitName);
             rt.addValue("c", r.c);
             rt.addValue("t", r.t);
+            if (hasTimeComparison) {
+                rt.addValue("t_from", r.tFrom);
+                rt.addValue("t_to", r.tTo);
+            }
             rt.addValue("volume_um3", r.volumeUm3);
             rt.addValue("volume_vox", r.volumeVox);
+            if (hasTimeComparison) {
+                rt.addValue("volume_from_um3", r.volumeFromUm3);
+                rt.addValue("volume_to_um3", r.volumeToUm3);
+                rt.addValue("delta_volume_um3", r.deltaVolumeUm3);
+                rt.addValue("volume_from_vox", r.volumeFromVox);
+                rt.addValue("volume_to_vox", r.volumeToVox);
+            }
             rt.addValue("surface_area_um2", r.surfaceAreaUm2);
             rt.addValue("sphericity", r.sphericity);
             rt.addValue("integrated_intensity", r.integratedIntensity);
@@ -409,6 +427,17 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             rt.addValue("centroid_x_um", r.centroidXUm);
             rt.addValue("centroid_y_um", r.centroidYUm);
             rt.addValue("centroid_z_um", r.centroidZUm);
+            if (hasTimeComparison) {
+                rt.addValue("centroid_from_x_um", r.centroidFromXUm);
+                rt.addValue("centroid_from_y_um", r.centroidFromYUm);
+                rt.addValue("centroid_from_z_um", r.centroidFromZUm);
+                rt.addValue("centroid_to_x_um", r.centroidToXUm);
+                rt.addValue("centroid_to_y_um", r.centroidToYUm);
+                rt.addValue("centroid_to_z_um", r.centroidToZUm);
+                rt.addValue("displacement_um", r.displacementUm);
+                rt.addValue("interval", r.interval);
+                rt.addValue("velocity_um_per_frame", r.velocityUmPerFrame);
+            }
             rt.addValue("max_feret3d_um", r.maxFeret3dUm);
         }
         rt.show("Object Measurements");
