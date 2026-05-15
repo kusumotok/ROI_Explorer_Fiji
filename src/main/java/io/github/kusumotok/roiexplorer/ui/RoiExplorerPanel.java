@@ -35,6 +35,7 @@ import java.text.ParseException;
 import java.util.*;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHost {
 
@@ -342,12 +343,14 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
         if (request.getProfile() != null) {
             // measureAll=true ignores current selection → uses all direct children of root
+            Consumer<String> progress = request.getProgress();
+            report(progress, "Preparing measurement...");
             List<ExplorerNode> sel = request.isMeasureAll()
                 ? Collections.<ExplorerNode>emptyList() : getSelectedNodes();
             List<ObjectMeasurementResult> results;
             try {
                 results = objectMeasureSvc.measure(sel, tableModel.getViewRoot(), request.getProfile(), boundImage,
-                        request.getTargetMode(), request.getCollectionMode());
+                        request.getTargetMode(), request.getCollectionMode(), progress);
             } catch (IllegalArgumentException e) {
                 return MeasurementResult.notPerformed(e.getMessage());
             }
@@ -359,6 +362,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             }
             if (request.getCsvOutputPath() != null) {
                 try {
+                    report(progress, "Writing CSV: " + request.getCsvOutputPath().getFileName() + "...");
                     objectMeasureCsvExporter.write(results, request.getCsvOutputPath(),
                             request.getEnabledColumns());
                 } catch (IOException e) {
@@ -366,6 +370,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 }
             }
             if (request.isShowResultsTable()) {
+                report(progress, "Rendering ResultsTable...");
                 showObjectMeasurementTable(results);
             }
             return MeasurementResult.performed("Measurement completed. " + results.size() + " object(s).");
@@ -398,6 +403,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             return MeasurementResult.notPerformed("Failed to save measurement CSV: " + e.getMessage());
         }
         return MeasurementResult.performed("Measurement completed.");
+    }
+
+    private static void report(Consumer<String> progress, String message) {
+        if (progress != null) progress.accept(message);
     }
 
     private void showObjectMeasurementTable(List<ObjectMeasurementResult> results) {
@@ -2757,7 +2766,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         }
         Roi pickHighlight = createHighlightRoi(hoveredPickNode, view, PICK_OVERLAY_COLOR, 1.5f);
         if (pickHighlight != null) overlay.add(pickHighlight);
-        if (view.main && watershed3dPreview != null) add3DWatershedPreviewOverlay(overlay, view);
+        if (watershed3dPreview != null) add3DWatershedPreviewOverlay(overlay, view);
         view.image.setOverlay(overlay.size() > 0 ? overlay : null);
         LAST_IMAGE_POSITIONS.put(view.image, currentImagePosition(view.image));
         view.image.updateAndDraw();

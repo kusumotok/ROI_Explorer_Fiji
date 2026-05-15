@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public final class ObjectMeasurementService {
 
@@ -40,17 +41,39 @@ public final class ObjectMeasurementService {
             ImagePlus image,
             MeasurementTargetMode targetMode,
             RoiCollectionMode collectionMode) {
+        return measure(selected, root, profile, image, targetMode, collectionMode, null);
+    }
 
+    public List<ObjectMeasurementResult> measure(
+            List<ExplorerNode> selected,
+            ExplorerNode root,
+            MeasurementProfile profile,
+            ImagePlus image,
+            MeasurementTargetMode targetMode,
+            RoiCollectionMode collectionMode,
+            Consumer<String> progress) {
+
+        report(progress, "Collecting measurement folders...");
         List<MeasurementUnit> units = collectUnits(selected, root, targetMode, collectionMode);
+        report(progress, "Measuring " + units.size() + " folder(s)...");
         List<ObjectMeasurementResult> all = new ArrayList<>();
         int spotId = 1;
+        int index = 1;
         for (MeasurementUnit unit : units) {
+            report(progress, "Measuring " + unit.getName() + " (" + index + "/" + units.size()
+                    + ", " + unit.getRois().size() + " ROI files)...");
             int unitSpotId = spotId++;
             for (ObjectMeasurementResult r : profile.measure(unit, image)) {
                 all.add(withSpotId(r, unitSpotId));
             }
+            index++;
         }
+        report(progress, "Measurement calculations completed: " + all.size() + " row(s).");
         return all;
+    }
+
+    private static void report(Consumer<String> progress, String message) {
+        if (progress != null) progress.accept(message);
     }
 
     private List<MeasurementUnit> collectUnits(List<ExplorerNode> selected, ExplorerNode root,
