@@ -44,8 +44,7 @@ public final class XyztTrackComparisonProfile implements MeasurementProfile {
     public List<ObjectMeasurementResult> measure(MeasurementUnit unit, ImagePlus image) {
         Map<Integer, List<RoiNode>> byT = groupByTime(unit);
         if (byT.size() < 2) {
-            throw new IllegalArgumentException(
-                "Unit '" + unit.getName() + "' requires at least two timepoints for XYZT comparison.");
+            return java.util.Collections.emptyList();
         }
 
         Map<Integer, ObjectMeasurementResult> baseByT = new TreeMap<>();
