@@ -66,6 +66,20 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
         return arr;
     }
 
+    public int[] restoreSelectionExpanding(List<Path> paths) {
+        if (paths == null || paths.isEmpty()) return new int[0];
+        boolean changed = false;
+        for (Path path : paths) {
+            ExplorerNode node = findByPath(viewRoot, path);
+            if (node != null) changed |= expandAncestors(node);
+        }
+        if (changed) {
+            rebuildVisibleRows();
+            fireTableDataChanged();
+        }
+        return restoreSelection(paths);
+    }
+
     public void toggleExpansion(int row) {
         ExplorerNode node = getNodeAt(row);
         if (node == null || node.isLeaf()) return;
@@ -83,6 +97,14 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
 
     public void expandPathTo(ExplorerNode node) {
         if (node == null) return;
+        boolean changed = expandAncestors(node);
+        if (changed) {
+            rebuildVisibleRows();
+            fireTableDataChanged();
+        }
+    }
+
+    private boolean expandAncestors(ExplorerNode node) {
         boolean changed = false;
         ExplorerNode current = node.getParent();
         while (current != null && current != viewRoot) {
@@ -92,10 +114,17 @@ public class ExplorerTreeTableModel extends AbstractTableModel {
             }
             current = current.getParent();
         }
-        if (changed) {
-            rebuildVisibleRows();
-            fireTableDataChanged();
+        return changed;
+    }
+
+    private ExplorerNode findByPath(ExplorerNode node, Path path) {
+        if (node == null || path == null) return null;
+        if (path.equals(node.getPath())) return node;
+        for (ExplorerNode child : node.getChildren()) {
+            ExplorerNode found = findByPath(child, path);
+            if (found != null) return found;
         }
+        return null;
     }
 
     public void expandAll(ExplorerNode from) {

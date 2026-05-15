@@ -2601,9 +2601,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     }
 
     private int restoreSelection(List<Path> paths) {
-        int[] rows = tableModel.restoreSelection(paths);
+        int[] rows = tableModel.restoreSelectionExpanding(paths);
         table.clearSelection();
         for (int row : rows) table.addRowSelectionInterval(row, row);
+        if (rows.length > 0) table.scrollRectToVisible(table.getCellRect(rows[0], 0, true));
         syncImagePositionToSelection();
         return rows.length;
     }
