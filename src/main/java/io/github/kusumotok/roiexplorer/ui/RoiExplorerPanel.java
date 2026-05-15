@@ -101,6 +101,7 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private ImagePlus subImage;
     private boolean overlayEnabled = true;
     private Path viewRootPath;
+    private Runnable diskChangeListener;
     private final SplitWorkflowSession splitWorkflow = new SplitWorkflowSession();
     private JDialog watershed3dDialog;
     private Watershed3DSelection watershed3dSelection;
@@ -323,6 +324,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
     public boolean ownsImage(ImagePlus image) {
         return overlayEnabled && image != null && (image == boundImage || image == subImage);
+    }
+
+    public void setDiskChangeListener(Runnable listener) {
+        this.diskChangeListener = listener;
     }
 
     public void measureCurrentRoot() {
@@ -832,7 +837,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         chkContainerOr.addActionListener(e -> refreshOverlay());
         btnSave.addActionListener(e -> {
             if (isSplitModeActive()) cmdSaveSplitMode();
-            else editCtrl.save(diskSync, historySvc, OpenViewRegistry.getInstance());
+            else {
+                editCtrl.save(diskSync, historySvc, OpenViewRegistry.getInstance());
+                notifyDiskChanged();
+            }
         });
         btnSelectionEdit.addActionListener(e -> cmdSelectionEditTools());
         btnEditUndo.addActionListener(e -> cmdUndo());
@@ -2309,6 +2317,11 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                                  Collection<Path> hiddenTargets,
                                  SessionHistoryService.IoRunnable action) throws IOException {
         historySvc.runUndoable(label, fileTargets, hiddenTargets, OpenViewRegistry.getInstance(), action);
+        notifyDiskChanged();
+    }
+
+    private void notifyDiskChanged() {
+        if (diskChangeListener != null) diskChangeListener.run();
     }
 
     private String historyMenuLabel(String prefix, String actionLabel) {
