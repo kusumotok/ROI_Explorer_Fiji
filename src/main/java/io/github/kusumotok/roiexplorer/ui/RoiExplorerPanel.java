@@ -341,7 +341,8 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 ? Collections.<ExplorerNode>emptyList() : getSelectedNodes();
             List<ObjectMeasurementResult> results;
             try {
-                results = objectMeasureSvc.measure(sel, tableModel.getViewRoot(), request.getProfile(), boundImage);
+                results = objectMeasureSvc.measure(sel, tableModel.getViewRoot(), request.getProfile(), boundImage,
+                        request.getTargetMode(), request.getCollectionMode());
             } catch (IllegalArgumentException e) {
                 return MeasurementResult.notPerformed(e.getMessage());
             }

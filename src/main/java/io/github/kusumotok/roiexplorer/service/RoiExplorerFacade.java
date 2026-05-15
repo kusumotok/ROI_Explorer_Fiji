@@ -4,6 +4,8 @@ import ij.ImagePlus;
 import io.github.kusumotok.roiexplorer.OpenViewRegistry;
 import io.github.kusumotok.roiexplorer.service.measure.MeasurementColumn;
 import io.github.kusumotok.roiexplorer.service.measure.MeasurementProfile;
+import io.github.kusumotok.roiexplorer.service.measure.MeasurementTargetMode;
+import io.github.kusumotok.roiexplorer.service.measure.RoiCollectionMode;
 import io.github.kusumotok.roiexplorer.ui.RoiExplorerPanel;
 
 import java.util.EnumSet;
@@ -152,11 +154,14 @@ public class RoiExplorerFacade {
         private final MeasurementProfile profile;
         private final Set<MeasurementColumn> enabledColumns;
         private final boolean measureAll;
+        private final MeasurementTargetMode targetMode;
+        private final RoiCollectionMode collectionMode;
 
         private MeasurementRequest(GroupMeasurementService.Options options, boolean promptForOptions,
                                    boolean showResultsTable, Path csvOutputPath,
                                    MeasurementProfile profile, Set<MeasurementColumn> enabledColumns,
-                                   boolean measureAll) {
+                                   boolean measureAll, MeasurementTargetMode targetMode,
+                                   RoiCollectionMode collectionMode) {
             this.options = options != null ? options.copy() : null;
             this.promptForOptions = promptForOptions;
             this.showResultsTable = showResultsTable;
@@ -165,38 +170,56 @@ public class RoiExplorerFacade {
             this.enabledColumns = enabledColumns != null
                 ? EnumSet.copyOf(enabledColumns) : null;
             this.measureAll = measureAll;
+            this.targetMode = targetMode != null ? targetMode
+                    : (measureAll ? MeasurementTargetMode.ROOT_CHILDREN_ONLY : MeasurementTargetMode.SELECTED_FOLDERS);
+            this.collectionMode = collectionMode != null ? collectionMode : RoiCollectionMode.FLATTEN;
         }
 
         /** Legacy: prompt user for GroupMeasurement options. */
         public static MeasurementRequest promptWithCurrentOptions() {
-            return new MeasurementRequest(null, true, true, null, null, null, false);
+            return new MeasurementRequest(null, true, true, null, null, null, false, null, null);
         }
 
         /** Legacy: run GroupMeasurement with the given options. */
         public static MeasurementRequest useOptions(GroupMeasurementService.Options options) {
-            return new MeasurementRequest(options, false, true, null, null, null, false);
+            return new MeasurementRequest(options, false, true, null, null, null, false, null, null);
         }
 
         /** New: run with a MeasurementProfile (e.g. XyzObjectProfile). */
         public static MeasurementRequest useProfile(MeasurementProfile profile) {
-            return new MeasurementRequest(null, false, false, null, profile, null, false);
+            return new MeasurementRequest(null, false, false, null, profile, null, false, null, null);
         }
 
         public MeasurementRequest withShowResultsTable(boolean v) {
-            return new MeasurementRequest(options, promptForOptions, v, csvOutputPath, profile, enabledColumns, measureAll);
+            return new MeasurementRequest(options, promptForOptions, v, csvOutputPath, profile, enabledColumns,
+                    measureAll, targetMode, collectionMode);
         }
 
         public MeasurementRequest withCsvOutput(Path p) {
-            return new MeasurementRequest(options, promptForOptions, showResultsTable, p, profile, enabledColumns, measureAll);
+            return new MeasurementRequest(options, promptForOptions, showResultsTable, p, profile, enabledColumns,
+                    measureAll, targetMode, collectionMode);
         }
 
         public MeasurementRequest withEnabledColumns(Set<MeasurementColumn> columns) {
-            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile, columns, measureAll);
+            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile, columns,
+                    measureAll, targetMode, collectionMode);
         }
 
         /** When true, ignore ROI Explorer selection and measure all direct children of the current root. */
         public MeasurementRequest withMeasureAll(boolean all) {
-            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile, enabledColumns, all);
+            MeasurementTargetMode nextTarget = all ? MeasurementTargetMode.ROOT_CHILDREN_ONLY : targetMode;
+            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile,
+                    enabledColumns, all, nextTarget, collectionMode);
+        }
+
+        public MeasurementRequest withTargetMode(MeasurementTargetMode mode) {
+            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile,
+                    enabledColumns, measureAll, mode, collectionMode);
+        }
+
+        public MeasurementRequest withCollectionMode(RoiCollectionMode mode) {
+            return new MeasurementRequest(options, promptForOptions, showResultsTable, csvOutputPath, profile,
+                    enabledColumns, measureAll, targetMode, mode);
         }
 
         public GroupMeasurementService.Options getOptions() {
@@ -212,6 +235,8 @@ public class RoiExplorerFacade {
             return enabledColumns != null ? EnumSet.copyOf(enabledColumns) : MeasurementColumn.allEnabled();
         }
         public boolean isMeasureAll() { return measureAll; }
+        public MeasurementTargetMode getTargetMode() { return targetMode; }
+        public RoiCollectionMode getCollectionMode() { return collectionMode; }
     }
 
     public static final class MeasurementResult {
