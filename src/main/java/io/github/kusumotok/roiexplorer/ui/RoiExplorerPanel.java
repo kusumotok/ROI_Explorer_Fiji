@@ -346,6 +346,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 return MeasurementResult.notPerformed(e.getMessage());
             }
             if (results.isEmpty()) {
+                if (request.getProfile() instanceof io.github.kusumotok.roiexplorer.service.measure.XyztTrackComparisonProfile) {
+                    return MeasurementResult.performed("Measurement completed. No comparable timepoint pairs were found.");
+                }
                 return MeasurementResult.notPerformed("No measurement units found.");
             }
             if (request.getCsvOutputPath() != null) {
