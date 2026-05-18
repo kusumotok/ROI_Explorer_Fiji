@@ -38,6 +38,9 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHost {
+    public interface OverlayDecorator {
+        void decorate(Overlay overlay, ImagePlus image, boolean subImage);
+    }
 
     // ── Services ─────────────────────────────────────────────────────────────
     private final DiskSyncService diskSync = new DiskSyncService();
@@ -101,6 +104,8 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
     private ImagePlus boundImage;
     private ImagePlus subImage;
     private boolean overlayEnabled = true;
+    private OverlayDecorator overlayDecorator;
+    private Color regularOverlayColorOverride;
     private Path viewRootPath;
     private Runnable diskChangeListener;
     private final SplitWorkflowSession splitWorkflow = new SplitWorkflowSession();
@@ -228,6 +233,16 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
 
     public java.util.List<Path> getSelectedPaths() {
         return tableModel.snapshotSelection(table.getSelectedRows());
+    }
+
+    public void setOverlayDecorator(OverlayDecorator decorator) {
+        overlayDecorator = decorator;
+        refreshOverlay();
+    }
+
+    public void setRegularOverlayColorOverride(Color color) {
+        regularOverlayColorOverride = color;
+        refreshOverlay();
     }
 
     public void closeFolder() {
@@ -2749,6 +2764,9 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
             return;
         }
         Overlay overlay = new Overlay();
+        if (overlayDecorator != null) {
+            overlayDecorator.decorate(overlay, view.image, view.image == subImage);
+        }
         RoiNode editingNode = editCtrl.getEditingNode();
         for (OverlayEntry entry : buildOverlayEntries(root)) {
             if (entry.target instanceof RoiNode && editCtrl.isEditing() && entry.target == editingNode) continue;
@@ -2757,6 +2775,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
                 Roi copy = (Roi) roi.clone();
                 applyProjectionPosition(copy, view);
                 if (copy.getName() == null || copy.getName().isEmpty()) copy.setName(entry.target.getName());
+                if (regularOverlayColorOverride != null) {
+                    copy.setFillColor(null);
+                    copy.setStrokeColor(regularOverlayColorOverride);
+                }
                 overlay.add(copy);
             }
         }
