@@ -226,6 +226,10 @@ public class RoiExplorerPanel extends JPanel implements RoiEditController.EditHo
         return viewRootPath != null && tableModel.getViewRoot() != null;
     }
 
+    public java.util.List<Path> getSelectedPaths() {
+        return tableModel.snapshotSelection(table.getSelectedRows());
+    }
+
     public void closeFolder() {
         uninstallPickMode();
         cleanupPreview();
